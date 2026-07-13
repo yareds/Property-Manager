@@ -183,9 +183,9 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
               onChange={(e) => setPropertyFilter(e.target.value)}
               className="bg-transparent font-bold text-slate-800 focus:outline-none cursor-pointer text-xs"
             >
-              <option value="ALL">All Properties</option>
-              {propertiesInPayments.map(pName => (
-                <option key={pName} value={pName}>{pName}</option>
+              <option key="ALL" value="ALL">All Properties</option>
+              {propertiesInPayments.filter(Boolean).map((pName, idx) => (
+                <option key={pName || `prop-${idx}`} value={pName}>{pName}</option>
               ))}
             </select>
           </div>
@@ -379,9 +379,9 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
                   }}
                   className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
                 >
-                  <option value="">-- Choose Tenant/Suite --</option>
-                  {leases.map(l => (
-                    <option key={l.id} value={l.id}>{l.businessName} - {l.propertyName} ({l.unitNumber})</option>
+                  <option key="default" value="">-- Choose Tenant/Suite --</option>
+                  {leases.map((l, idx) => (
+                    <option key={l.id || `lease-${idx}`} value={l.id}>{l.businessName} - {l.propertyName} ({l.unitNumber})</option>
                   ))}
                 </select>
               </div>

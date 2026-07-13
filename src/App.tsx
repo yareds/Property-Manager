@@ -68,7 +68,9 @@ export default function App() {
     markNotificationAsRead,
     clearAllNotifications,
     addDocument,
-    deleteDocument
+    deleteDocument,
+    seedDatabase,
+    clearAllData
   } = useFirebase();
 
   const [activeTab, setActiveTab] = useState('dashboard');
@@ -435,6 +437,39 @@ export default function App() {
             </div>
           )}
 
+          {isGuest && (
+            <div className="space-y-2">
+              <div className="flex items-center space-x-2 px-1 py-1">
+                <div className="h-7 w-7 rounded-full bg-slate-700 flex items-center justify-center font-extrabold text-white text-[11px] border border-white/10">
+                  G
+                </div>
+                <div className="flex flex-col truncate">
+                  <span className="text-[11px] font-bold text-white truncate">Guest Session</span>
+                  <span className="text-[9px] text-slate-400 truncate font-mono">Offline-first Mode</span>
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-1.5 pt-1">
+                <button
+                  onClick={seedDatabase}
+                  className="py-1.5 px-2 bg-indigo-600/20 hover:bg-indigo-600/35 border border-indigo-500/20 text-indigo-300 rounded text-[9px] font-bold tracking-wide uppercase transition duration-150 flex items-center justify-center space-x-1 cursor-pointer"
+                  title="Populate/Reset default lease & properties lists"
+                >
+                  <Sparkles size={10} className="text-indigo-400" />
+                  <span>Populate</span>
+                </button>
+                <button
+                  onClick={clearAllData}
+                  className="py-1.5 px-2 bg-red-950/30 hover:bg-red-950/50 border border-red-500/15 text-red-300 rounded text-[9px] font-bold tracking-wide uppercase transition duration-150 flex items-center justify-center space-x-1 cursor-pointer"
+                  title="Clear all local structures"
+                >
+                  <X size={10} className="text-red-400" />
+                  <span>Clear All</span>
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="text-[10px] text-slate-500 font-mono text-center pt-1 opacity-60">
             v2.4.0 High-Density Edition
           </div>
@@ -671,6 +706,8 @@ export default function App() {
                   payments={payments}
                   maintenance={maintenance}
                   onNavigate={handleTabChange}
+                  isGuest={isGuest}
+                  onSeed={seedDatabase}
                 />
               )}
 

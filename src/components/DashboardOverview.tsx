@@ -36,6 +36,8 @@ interface DashboardOverviewProps {
   payments: Payment[];
   maintenance: MaintenanceRequest[];
   onNavigate: (tab: string) => void;
+  isGuest?: boolean;
+  onSeed?: () => Promise<void> | void;
 }
 
 const COLORS = ['#10B981', '#F59E0B', '#EF4444', '#3B82F6', '#8B5CF6'];
@@ -47,7 +49,9 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
   leases,
   payments,
   maintenance,
-  onNavigate
+  onNavigate,
+  isGuest,
+  onSeed
 }) => {
   // 1. Metric Calculations
   const totalProperties = properties.length;
@@ -129,6 +133,30 @@ export const DashboardOverview: React.FC<DashboardOverviewProps> = ({
           </p>
         </div>
       </div>
+
+      {properties.length === 0 && (
+        <div className="bg-amber-50 border border-amber-200 rounded p-5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+          <div className="flex items-start space-x-3.5">
+            <div className="p-2.5 bg-amber-100 text-amber-700 rounded-xl shrink-0">
+              <AlertTriangle size={20} />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-sm font-bold text-slate-900">Your Portfolio is Empty</h3>
+              <p className="text-xs text-slate-600 leading-relaxed max-w-xl">
+                There are no properties or leases loaded. You can construct properties, suites, and directory rosters manually, or load a set of standard, high-fidelity sample records instantly.
+              </p>
+            </div>
+          </div>
+          {onSeed && (
+            <button
+              onClick={() => onSeed()}
+              className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition shadow shrink-0 self-start md:self-auto cursor-pointer"
+            >
+              Populate Sample Data
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Grid Metrics Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
