@@ -1,0 +1,6 @@
+{
+  "name": "Getch ProManager",
+  "description": "Centralized dashboard for managing buildings, units, leases, payments, tenants, and maintenance workflows with robust financial analytics.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

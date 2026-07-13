@@ -1,0 +1,193 @@
+{
+  "entities": {
+    "Property": {
+      "title": "Property",
+      "description": "A building or commercial property owned by the business",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "type": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "address", "type"]
+    },
+    "Unit": {
+      "title": "Unit",
+      "description": "An individual rental space/unit inside a property",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "propertyName": { "type": "string" },
+        "unitNumber": { "type": "string" },
+        "type": { "type": "string" },
+        "sizeSqFt": { "type": "number" },
+        "monthlyRent": { "type": "number" },
+        "occupancyStatus": { "type": "string", "enum": ["Occupied", "Vacant", "Reserved", "Maintenance"] },
+        "tenantId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "propertyId", "propertyName", "unitNumber", "type", "sizeSqFt", "monthlyRent", "occupancyStatus"]
+    },
+    "Tenant": {
+      "title": "Tenant",
+      "description": "A business or tenant leasing a unit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "businessName": { "type": "string" },
+        "contactPerson": { "type": "string" },
+        "email": { "type": "string" },
+        "phone": { "type": "string" },
+        "businessType": { "type": "string" },
+        "emergencyContactName": { "type": "string" },
+        "emergencyContactPhone": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "businessName", "contactPerson", "email", "phone", "businessType"]
+    },
+    "Lease": {
+      "title": "Lease",
+      "description": "A lease agreement between the business and a tenant for a unit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "businessName": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "propertyName": { "type": "string" },
+        "unitId": { "type": "string" },
+        "unitNumber": { "type": "string" },
+        "startDate": { "type": "string" },
+        "endDate": { "type": "string" },
+        "monthlyRent": { "type": "number" },
+        "depositAmount": { "type": "number" },
+        "status": { "type": "string", "enum": ["Active", "Pending", "Expired", "Terminated"] },
+        "renewalHistory": { "type": "array" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tenantId", "businessName", "propertyId", "propertyName", "unitId", "unitNumber", "startDate", "endDate", "monthlyRent", "status"]
+    },
+    "Payment": {
+      "title": "Payment",
+      "description": "A rent payment transaction",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "tenantId": { "type": "string" },
+        "businessName": { "type": "string" },
+        "leaseId": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "unitId": { "type": "string" },
+        "unitNumber": { "type": "string" },
+        "dueDate": { "type": "string" },
+        "paymentDate": { "type": "string" },
+        "amountDue": { "type": "number" },
+        "amountPaid": { "type": "number" },
+        "paymentStatus": { "type": "string", "enum": ["Paid", "Partially Paid", "Overdue", "Unpaid"] },
+        "paymentMethod": { "type": "string" },
+        "receiptNumber": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "tenantId", "businessName", "leaseId", "propertyId", "unitId", "unitNumber", "dueDate", "amountDue", "amountPaid", "paymentStatus"]
+    },
+    "MaintenanceRequest": {
+      "title": "MaintenanceRequest",
+      "description": "A work order or maintenance request for a unit",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "propertyId": { "type": "string" },
+        "propertyName": { "type": "string" },
+        "unitId": { "type": "string" },
+        "unitNumber": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "priority": { "type": "string", "enum": ["Low", "Medium", "High", "Emergency"] },
+        "status": { "type": "string", "enum": ["New", "In Progress", "On Hold", "Completed"] },
+        "assignedContractor": { "type": "string" },
+        "cost": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "propertyId", "propertyName", "unitId", "unitNumber", "title", "priority", "status"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "An alert or reminder for lease expirations, overdue rent, etc.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "type": { "type": "string" },
+        "status": { "type": "string", "enum": ["Unread", "Read"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "title", "message", "type", "status", "createdAt"]
+    },
+    "Document": {
+      "title": "Document",
+      "description": "A lease agreement, insurance certificate, license, or receipt",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "associatedWith": { "type": "string" },
+        "associatedId": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileType": { "type": "string" },
+        "fileSize": { "type": "number" },
+        "expiryDate": { "type": "string" },
+        "url": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "type", "associatedWith", "associatedId", "fileName", "url"]
+    }
+  },
+  "firestore": {
+    "properties": {
+      "schema": "Property",
+      "description": "List of commercial properties/buildings"
+    },
+    "units": {
+      "schema": "Unit",
+      "description": "List of all units in all buildings"
+    },
+    "tenants": {
+      "schema": "Tenant",
+      "description": "List of tenants"
+    },
+    "leases": {
+      "schema": "Lease",
+      "description": "Lease contract logs and histories"
+    },
+    "payments": {
+      "schema": "Payment",
+      "description": "Rent payments log"
+    },
+    "maintenance": {
+      "schema": "MaintenanceRequest",
+      "description": "Work orders and request tracker"
+    },
+    "notifications": {
+      "schema": "Notification",
+      "description": "App notification ledger"
+    },
+    "documents": {
+      "schema": "Document",
+      "description": "Metadata for uploaded lease files, receipts, insurance certs"
+    }
+  }
+}
