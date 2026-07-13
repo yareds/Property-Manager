@@ -12,14 +12,8 @@ service cloud.firestore {
       return request.auth != null;
     }
     
-    function isEmailVerified() {
-      return isSignedIn() && request.auth.token.email_verified == true;
-    }
-
-    function isOwner() {
-      // Allow the specific business owner, or allow in development environments
-      // to make it easily accessible while retaining robust checks.
-      return isSignedIn() && (request.auth.token.email == 'yared.abegaz@gmail.com' || request.auth.token.email == 'test@example.com' || request.auth.token.email != null);
+    function isVerified() {
+      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.email != null);
     }
 
     function isValidId(id) {
@@ -43,7 +37,8 @@ service cloud.firestore {
         && data.address is string && data.address.size() > 0 && data.address.size() <= 300
         && data.type is string && (data.type == 'Commercial' || data.type == 'Office' || data.type == 'Retail' || data.type == 'Industrial' || data.type == 'Residential')
         && data.createdAt is string && data.updatedAt is string
-        && (data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() <= 1024));
+        && (data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() <= 1024))
+        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidUnit(data) {
@@ -58,7 +53,8 @@ service cloud.firestore {
         && data.monthlyRent is number && data.monthlyRent >= 0
         && data.occupancyStatus is string && (data.occupancyStatus == 'Occupied' || data.occupancyStatus == 'Vacant' || data.occupancyStatus == 'Reserved' || data.occupancyStatus == 'Maintenance')
         && data.createdAt is string && data.updatedAt is string
-        && (data.tenantId == null || (data.tenantId is string && data.tenantId.size() <= 128));
+        && (data.tenantId == null || (data.tenantId is string && data.tenantId.size() <= 128))
+        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidTenant(data) {
@@ -72,12 +68,13 @@ service cloud.firestore {
         && data.businessType is string && data.businessType.size() <= 100
         && data.emergencyContactName is string && data.emergencyContactName.size() <= 200
         && data.emergencyContactPhone is string && data.emergencyContactPhone.size() <= 32
-        && data.createdAt is string && data.updatedAt is string;
+        && data.createdAt is string && data.updatedAt is string
+        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidLease(data) {
       return data.keys().hasAll(['id', 'tenantId', 'businessName', 'propertyId', 'propertyName', 'unitId', 'unitNumber', 'startDate', 'endDate', 'monthlyRent', 'status', 'createdAt', 'updatedAt'])
-        && data.keys().size() <= 15
+        && data.keys().size() <= 16
         && data.id is string && data.id.size() <= 128
         && data.tenantId is string && data.tenantId.size() <= 128
         && data.businessName is string && data.businessName.size() <= 200
@@ -88,14 +85,16 @@ service cloud.firestore {
         && data.startDate is string && data.startDate.size() <= 32
         && data.endDate is string && data.endDate.size() <= 32
         && data.monthlyRent is number && data.monthlyRent >= 0
+        && (data.depositAmount == null || data.depositAmount is number)
         && data.status is string && (data.status == 'Active' || data.status == 'Pending' || data.status == 'Expired' || data.status == 'Terminated')
         && data.createdAt is string && data.updatedAt is string
-        && (data.renewalHistory == null || data.renewalHistory is list);
+        && (data.renewalHistory == null || data.renewalHistory is list)
+        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidPayment(data) {
       return data.keys().hasAll(['id', 'tenantId', 'businessName', 'leaseId', 'propertyId', 'unitId', 'unitNumber', 'dueDate', 'amountDue', 'amountPaid', 'paymentStatus', 'createdAt', 'updatedAt'])
-        && data.keys().size() <= 17
+        && data.keys().size() <= 18
         && data.id is string && data.id.size() <= 128
         && data.tenantId is string && data.tenantId.size() <= 128
         && data.businessName is string && data.businessName.size() <= 200
@@ -111,12 +110,13 @@ service cloud.firestore {
         && (data.paymentDate == null || data.paymentDate is string)
         && (data.paymentMethod == null || data.paymentMethod is string)
         && (data.receiptNumber == null || data.receiptNumber is string)
-        && (data.notes == null || data.notes is string);
+        && (data.notes == null || data.notes is string)
+        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidMaintenanceRequest(data) {
       return data.keys().hasAll(['id', 'propertyId', 'propertyName', 'unitId', 'unitNumber', 'title', 'description', 'priority', 'status', 'createdAt', 'updatedAt'])
-        && data.keys().size() <= 13
+        && data.keys().size() <= 14
         && data.id is string && data.id.size() <= 128
         && data.propertyId is string && data.propertyId.size() <= 128
         && data.propertyName is string && data.propertyName.size() <= 200
@@ -128,23 +128,25 @@ service cloud.firestore {
         && data.status is string && (data.status == 'New' || data.status == 'In Progress' || data.status == 'On Hold' || data.status == 'Completed')
         && data.createdAt is string && data.updatedAt is string
         && (data.assignedContractor == null || data.assignedContractor is string)
-        && (data.cost == null || data.cost is number);
+        && (data.cost == null || data.cost is number)
+        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidNotification(data) {
       return data.keys().hasAll(['id', 'title', 'message', 'type', 'status', 'createdAt'])
-        && data.keys().size() <= 6
+        && data.keys().size() <= 8
         && data.id is string && data.id.size() <= 128
         && data.title is string && data.title.size() <= 200
         && data.message is string && data.message.size() <= 1000
         && data.type is string && data.type.size() <= 64
         && data.createdAt is string
-        && data.status is string && (data.status == 'Unread' || data.status == 'Read');
+        && data.status is string && (data.status == 'Unread' || data.status == 'Read')
+        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidDocument(data) {
       return data.keys().hasAll(['id', 'name', 'type', 'associatedWith', 'associatedId', 'fileName', 'url', 'createdAt', 'updatedAt'])
-        && data.keys().size() <= 11
+        && data.keys().size() <= 13
         && data.id is string && data.id.size() <= 128
         && data.name is string && data.name.size() <= 200
         && data.type is string && data.type.size() <= 64
@@ -155,64 +157,65 @@ service cloud.firestore {
         && data.createdAt is string && data.updatedAt is string
         && (data.fileType == null || data.fileType is string)
         && (data.fileSize == null || data.fileSize is number)
-        && (data.expiryDate == null || data.expiryDate is string);
+        && (data.expiryDate == null || data.expiryDate is string)
+        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
     }
 
     // Map matches to Collections
     match /properties/{propertyId} {
-      allow read: if isOwner();
-      allow create: if isOwner() && isValidId(propertyId) && isValidProperty(incoming());
-      allow update: if isOwner() && isValidProperty(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isOwner();
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(propertyId) && isValidProperty(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidProperty(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
     }
 
     match /units/{unitId} {
-      allow read: if isOwner();
-      allow create: if isOwner() && isValidId(unitId) && isValidUnit(incoming());
-      allow update: if isOwner() && isValidUnit(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isOwner();
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(unitId) && isValidUnit(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidUnit(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
     }
 
     match /tenants/{tenantId} {
-      allow read: if isOwner();
-      allow create: if isOwner() && isValidId(tenantId) && isValidTenant(incoming());
-      allow update: if isOwner() && isValidTenant(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isOwner();
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(tenantId) && isValidTenant(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidTenant(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
     }
 
     match /leases/{leaseId} {
-      allow read: if isOwner();
-      allow create: if isOwner() && isValidId(leaseId) && isValidLease(incoming());
-      allow update: if isOwner() && isValidLease(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isOwner();
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(leaseId) && isValidLease(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidLease(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
     }
 
     match /payments/{paymentId} {
-      allow read: if isOwner();
-      allow create: if isOwner() && isValidId(paymentId) && isValidPayment(incoming());
-      allow update: if isOwner() && isValidPayment(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isOwner();
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(paymentId) && isValidPayment(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidPayment(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
     }
 
     match /maintenance/{maintenanceId} {
-      allow read: if isOwner();
-      allow create: if isOwner() && isValidId(maintenanceId) && isValidMaintenanceRequest(incoming());
-      allow update: if isOwner() && isValidMaintenanceRequest(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isOwner();
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(maintenanceId) && isValidMaintenanceRequest(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidMaintenanceRequest(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
     }
 
     match /notifications/{notificationId} {
-      allow read: if isOwner();
-      allow create: if isOwner() && isValidId(notificationId) && isValidNotification(incoming());
-      allow update: if isOwner() && isValidNotification(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isOwner();
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(notificationId) && isValidNotification(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidNotification(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
     }
 
     match /documents/{documentId} {
-      allow read: if isOwner();
-      allow create: if isOwner() && isValidId(documentId) && isValidDocument(incoming());
-      allow update: if isOwner() && isValidDocument(incoming()) && incoming().createdAt == existing().createdAt;
-      allow delete: if isOwner();
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(documentId) && isValidDocument(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidDocument(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
     }
   }
 }

@@ -56,7 +56,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   throw new Error(JSON.stringify(errInfo));
 }
 
-// Connection test is omitted as database operations are fully powered by Cloud SQL (PostgreSQL).
+// Database operations are fully powered by Cloud Firestore.
 
 // Google Sign-In helper
 export async function signInWithGoogle() {

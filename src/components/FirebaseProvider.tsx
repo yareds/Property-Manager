@@ -1,6 +1,16 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { onAuthStateChanged, User } from 'firebase/auth';
-import { auth, signInWithGoogle, logoutUser } from '../firebase';
+import { auth, signInWithGoogle, logoutUser, db, handleFirestoreError, OperationType } from '../firebase';
+import { 
+  collection, 
+  doc, 
+  getDocs, 
+  setDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  writeBatch 
+} from 'firebase/firestore';
 import { 
   Property, 
   Unit, 
@@ -145,38 +155,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     localStorage.setItem(key, JSON.stringify(data));
   };
 
-  // REST API FETCH HELPER WITH AUTHENTICATION
-  const fetchWithAuth = async (url: string, options: RequestInit = {}) => {
-    const currentUser = auth.currentUser;
-    const headers = {
-      'Content-Type': 'application/json',
-      ...(options.headers || {}),
-    } as Record<string, string>;
-
-    if (currentUser) {
-      try {
-        const token = await currentUser.getIdToken();
-        headers['Authorization'] = `Bearer ${token}`;
-      } catch (err) {
-        console.error('Failed to get Firebase Auth token:', err);
-      }
-    } else if (isGuest) {
-      headers['Authorization'] = 'Bearer guest';
-    }
-
-    const response = await fetch(url, {
-      ...options,
-      headers,
-    });
-
-    if (!response.ok) {
-      const text = await response.text();
-      throw new Error(text || `HTTP ${response.status}`);
-    }
-
-    return response.json();
-  };
-
   // Login handler
   const login = async () => {
     try {
@@ -220,7 +198,57 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     return unsubscribe;
   }, []);
 
-  // Sync / Load data from backend Express REST APIs
+  // Direct Firestore Seeding Helper (Client Side)
+  const seedDatabaseDirect = async (uid: string) => {
+    const batch = writeBatch(db);
+    const nowStr = new Date().toISOString();
+
+    const seeds = [
+      { coll: 'properties', items: DEFAULT_PROPERTIES },
+      { coll: 'tenants', items: DEFAULT_TENANTS },
+      { coll: 'units', items: DEFAULT_UNITS },
+      { coll: 'leases', items: DEFAULT_LEASES.map(l => ({ ...l, renewalHistory: l.renewalHistory || null })) },
+      { coll: 'payments', items: DEFAULT_PAYMENTS },
+      { coll: 'maintenance', items: DEFAULT_MAINTENANCE },
+      { coll: 'notifications', items: DEFAULT_NOTIFICATIONS },
+      { coll: 'documents', items: DEFAULT_DOCUMENTS || [] }
+    ];
+
+    for (const seed of seeds) {
+      seed.items.forEach((item: any) => {
+        const docRef = doc(db, seed.coll, item.id);
+        batch.set(docRef, {
+          ...item,
+          userId: uid,
+          createdAt: item.createdAt || nowStr,
+          updatedAt: item.updatedAt || nowStr
+        });
+      });
+    }
+    await batch.commit();
+  };
+
+  // Direct Firestore Clear Helper (Client Side)
+  const clearAllDataDirect = async (uid: string) => {
+    const colls = ['properties', 'units', 'tenants', 'leases', 'payments', 'maintenance', 'notifications', 'documents'];
+    const batch = writeBatch(db);
+    let count = 0;
+    
+    await Promise.all(colls.map(async (name) => {
+      const q = query(collection(db, name), where('userId', '==', uid));
+      const snap = await getDocs(q);
+      snap.docs.forEach(d => {
+        batch.delete(d.ref);
+        count++;
+      });
+    }));
+
+    if (count > 0) {
+      await batch.commit();
+    }
+  };
+
+  // Sync / Load data directly from Firestore Client SDK
   useEffect(() => {
     if (authLoading) return;
 
@@ -228,25 +256,89 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       setLoading(true);
       const loadAllData = async () => {
         try {
-          let data = await fetchWithAuth('/api/all');
-          
-          // Auto-seed if the database is empty
-          if (!data.properties || data.properties.length === 0) {
-            console.log("Database is empty, auto-seeding sample records...");
-            await fetchWithAuth('/api/seed', { method: 'POST' });
-            data = await fetchWithAuth('/api/all');
-          }
+          if (user) {
+            const uid = user.uid;
+            
+            // Helper to load collection for user
+            const loadColl = async (name: string) => {
+              try {
+                const q = query(collection(db, name), where('userId', '==', uid));
+                const snap = await getDocs(q);
+                return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+              } catch (err: any) {
+                if (err?.message?.includes('permission') || err?.code === 'permission-denied') {
+                  handleFirestoreError(err, OperationType.LIST, name);
+                }
+                throw err;
+              }
+            };
 
-          setProperties((data.properties || []).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-          setUnits((data.units || []).sort((a: any, b: any) => a.unitNumber.localeCompare(b.unitNumber)));
-          setTenants((data.tenants || []).sort((a: any, b: any) => a.businessName.localeCompare(b.businessName)));
-          setLeases((data.leases || []).sort((a: any, b: any) => b.endDate.localeCompare(a.endDate)));
-          setPayments((data.payments || []).sort((a: any, b: any) => b.dueDate.localeCompare(a.dueDate)));
-          setMaintenance((data.maintenance || []).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-          setNotifications((data.notifications || []).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-          setDocuments((data.documents || []).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+            const [
+              propsData,
+              unitsData,
+              tenantsData,
+              leasesData,
+              paymentsData,
+              maintData,
+              notifData,
+              docsData
+            ] = await Promise.all([
+              loadColl('properties'),
+              loadColl('units'),
+              loadColl('tenants'),
+              loadColl('leases'),
+              loadColl('payments'),
+              loadColl('maintenance'),
+              loadColl('notifications'),
+              loadColl('documents')
+            ]);
+
+            // Auto-seed if the database is empty for this user
+            if (propsData.length === 0) {
+              console.log("Database is empty, auto-seeding sample records...");
+              await seedDatabaseDirect(uid);
+              // Reload
+              const [p, u, t, l, pay, m, n, d] = await Promise.all([
+                loadColl('properties'),
+                loadColl('units'),
+                loadColl('tenants'),
+                loadColl('leases'),
+                loadColl('payments'),
+                loadColl('maintenance'),
+                loadColl('notifications'),
+                loadColl('documents')
+              ]);
+              setProperties(p.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Property[]);
+              setUnits(u.sort((a: any, b: any) => a.unitNumber.localeCompare(b.unitNumber)) as Unit[]);
+              setTenants(t.sort((a: any, b: any) => a.businessName.localeCompare(b.businessName)) as Tenant[]);
+              setLeases(l.sort((a: any, b: any) => b.endDate.localeCompare(a.endDate)) as Lease[]);
+              setPayments(pay.sort((a: any, b: any) => b.dueDate.localeCompare(a.dueDate)) as Payment[]);
+              setMaintenance(m.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as MaintenanceRequest[]);
+              setNotifications(n.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Notification[]);
+              setDocuments(d.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Document[]);
+            } else {
+              setProperties(propsData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Property[]);
+              setUnits(unitsData.sort((a: any, b: any) => a.unitNumber.localeCompare(b.unitNumber)) as Unit[]);
+              setTenants(tenantsData.sort((a: any, b: any) => a.businessName.localeCompare(b.businessName)) as Tenant[]);
+              setLeases(leasesData.sort((a: any, b: any) => b.endDate.localeCompare(a.endDate)) as Lease[]);
+              setPayments(paymentsData.sort((a: any, b: any) => b.dueDate.localeCompare(a.dueDate)) as Payment[]);
+              setMaintenance(maintData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as MaintenanceRequest[]);
+              setNotifications(notifData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Notification[]);
+              setDocuments(docsData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Document[]);
+            }
+          } else if (isGuest) {
+            setProperties(getLocalStorageData('pm_properties', DEFAULT_PROPERTIES));
+            setUnits(getLocalStorageData('pm_units', DEFAULT_UNITS));
+            setTenants(getLocalStorageData('pm_tenants', DEFAULT_TENANTS));
+            setLeases(getLocalStorageData('pm_leases', DEFAULT_LEASES));
+            setPayments(getLocalStorageData('pm_payments', DEFAULT_PAYMENTS));
+            setMaintenance(getLocalStorageData('pm_maintenance', DEFAULT_MAINTENANCE));
+            setNotifications(getLocalStorageData('pm_notifications', DEFAULT_NOTIFICATIONS));
+            setDocuments(getLocalStorageData('pm_documents', DEFAULT_DOCUMENTS));
+          }
         } catch (err) {
-          console.error("Failed to load Cloud SQL data:", err);
+          console.error("Failed to load database data:", err);
+          // Fallback to local storage if user is in guest mode or on error
           if (isGuest) {
             setProperties(getLocalStorageData('pm_properties', DEFAULT_PROPERTIES));
             setUnits(getLocalStorageData('pm_units', DEFAULT_UNITS));
@@ -292,20 +384,44 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // SEED DATABASE WITH SAMPLE DATA
   const seedDatabase = async () => {
-    if (user || isGuest) {
+    if (user) {
       setLoading(true);
       try {
-        await fetchWithAuth('/api/seed', { method: 'POST' });
+        await seedDatabaseDirect(user.uid);
+        
         // Reload all data
-        const data = await fetchWithAuth('/api/all');
-        setProperties((data.properties || []).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-        setUnits((data.units || []).sort((a: any, b: any) => a.unitNumber.localeCompare(b.unitNumber)));
-        setTenants((data.tenants || []).sort((a: any, b: any) => a.businessName.localeCompare(b.businessName)));
-        setLeases((data.leases || []).sort((a: any, b: any) => b.endDate.localeCompare(a.endDate)));
-        setPayments((data.payments || []).sort((a: any, b: any) => b.dueDate.localeCompare(a.dueDate)));
-        setMaintenance((data.maintenance || []).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-        setNotifications((data.notifications || []).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
-        setDocuments((data.documents || []).sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)));
+        const loadColl = async (name: string) => {
+          try {
+            const q = query(collection(db, name), where('userId', '==', user.uid));
+            const snap = await getDocs(q);
+            return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+          } catch (err: any) {
+            if (err?.message?.includes('permission') || err?.code === 'permission-denied') {
+              handleFirestoreError(err, OperationType.LIST, name);
+            }
+            throw err;
+          }
+        };
+
+        const [p, u, t, l, pay, m, n, d] = await Promise.all([
+          loadColl('properties'),
+          loadColl('units'),
+          loadColl('tenants'),
+          loadColl('leases'),
+          loadColl('payments'),
+          loadColl('maintenance'),
+          loadColl('notifications'),
+          loadColl('documents')
+        ]);
+
+        setProperties(p.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Property[]);
+        setUnits(u.sort((a: any, b: any) => a.unitNumber.localeCompare(b.unitNumber)) as Unit[]);
+        setTenants(t.sort((a: any, b: any) => a.businessName.localeCompare(b.businessName)) as Tenant[]);
+        setLeases(l.sort((a: any, b: any) => b.endDate.localeCompare(a.endDate)) as Lease[]);
+        setPayments(pay.sort((a: any, b: any) => b.dueDate.localeCompare(a.dueDate)) as Payment[]);
+        setMaintenance(m.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as MaintenanceRequest[]);
+        setNotifications(n.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Notification[]);
+        setDocuments(d.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Document[]);
       } catch (err) {
         console.error("Failed to seed database:", err);
       } finally {
@@ -325,10 +441,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // CLEAR ALL DATA
   const clearAllData = async () => {
-    if (user || isGuest) {
+    if (user) {
       setLoading(true);
       try {
-        await fetchWithAuth('/api/clear', { method: 'POST' });
+        await clearAllDataDirect(user.uid);
         setProperties([]);
         setUnits([]);
         setTenants([]);
@@ -365,11 +481,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth('/api/properties', {
-          method: 'POST',
-          body: JSON.stringify(newProp),
+        await setDoc(doc(db, 'properties', newProp.id), {
+          ...newProp,
+          userId: user.uid
         });
         setProperties(prev => [newProp, ...prev]);
       } catch (err) {
@@ -385,12 +501,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...property,
       updatedAt: new Date().toISOString()
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/properties/${property.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updated),
-        });
+        await setDoc(doc(db, 'properties', property.id), {
+          ...updated,
+          userId: user.uid
+        }, { merge: true });
         setProperties(prev => prev.map(p => p.id === property.id ? updated : p));
       } catch (err) {
         console.error('Failed to update property:', err);
@@ -401,11 +517,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteProperty = async (id: string) => {
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/properties/${id}`, {
-          method: 'DELETE'
-        });
+        await deleteDoc(doc(db, 'properties', id));
         setProperties(prev => prev.filter(p => p.id !== id));
       } catch (err) {
         console.error('Failed to delete property:', err);
@@ -425,11 +539,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth('/api/units', {
-          method: 'POST',
-          body: JSON.stringify(newUnit),
+        await setDoc(doc(db, 'units', newUnit.id), {
+          ...newUnit,
+          userId: user.uid
         });
         setUnits(prev => [...prev, newUnit]);
       } catch (err) {
@@ -445,12 +559,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...unit,
       updatedAt: new Date().toISOString()
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/units/${unit.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updated),
-        });
+        await setDoc(doc(db, 'units', unit.id), {
+          ...updated,
+          userId: user.uid
+        }, { merge: true });
         setUnits(prev => prev.map(u => u.id === unit.id ? updated : u));
       } catch (err) {
         console.error('Failed to update unit:', err);
@@ -461,11 +575,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteUnit = async (id: string) => {
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/units/${id}`, {
-          method: 'DELETE'
-        });
+        await deleteDoc(doc(db, 'units', id));
         setUnits(prev => prev.filter(u => u.id !== id));
       } catch (err) {
         console.error('Failed to delete unit:', err);
@@ -485,11 +597,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth('/api/tenants', {
-          method: 'POST',
-          body: JSON.stringify(newTenant),
+        await setDoc(doc(db, 'tenants', newTenant.id), {
+          ...newTenant,
+          userId: user.uid
         });
         setTenants(prev => [...prev, newTenant]);
       } catch (err) {
@@ -505,12 +617,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...tenant,
       updatedAt: new Date().toISOString()
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/tenants/${tenant.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updated),
-        });
+        await setDoc(doc(db, 'tenants', tenant.id), {
+          ...updated,
+          userId: user.uid
+        }, { merge: true });
         setTenants(prev => prev.map(t => t.id === tenant.id ? updated : t));
       } catch (err) {
         console.error('Failed to update tenant:', err);
@@ -521,11 +633,10 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteTenant = async (id: string) => {
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/tenants/${id}`, {
-          method: 'DELETE'
-        });
+        await deleteDoc(doc(db, 'tenants', id));
+        setTenants(prev => prev.filter(t => d => d.id !== id));
         setTenants(prev => prev.filter(t => t.id !== id));
       } catch (err) {
         console.error('Failed to delete tenant:', err);
@@ -545,11 +656,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth('/api/leases', {
-          method: 'POST',
-          body: JSON.stringify(newLease),
+        await setDoc(doc(db, 'leases', newLease.id), {
+          ...newLease,
+          userId: user.uid
         });
         setLeases(prev => [newLease, ...prev]);
       } catch (err) {
@@ -565,12 +676,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...lease,
       updatedAt: new Date().toISOString()
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/leases/${lease.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updated),
-        });
+        await setDoc(doc(db, 'leases', lease.id), {
+          ...updated,
+          userId: user.uid
+        }, { merge: true });
         setLeases(prev => prev.map(l => l.id === lease.id ? updated : l));
       } catch (err) {
         console.error('Failed to update lease:', err);
@@ -581,11 +692,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteLease = async (id: string) => {
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/leases/${id}`, {
-          method: 'DELETE'
-        });
+        await deleteDoc(doc(db, 'leases', id));
         setLeases(prev => prev.filter(l => l.id !== id));
       } catch (err) {
         console.error('Failed to delete lease:', err);
@@ -605,11 +714,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth('/api/payments', {
-          method: 'POST',
-          body: JSON.stringify(newPayment),
+        await setDoc(doc(db, 'payments', newPayment.id), {
+          ...newPayment,
+          userId: user.uid
         });
         setPayments(prev => [newPayment, ...prev]);
       } catch (err) {
@@ -625,12 +734,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...payment,
       updatedAt: new Date().toISOString()
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/payments/${payment.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updated),
-        });
+        await setDoc(doc(db, 'payments', payment.id), {
+          ...updated,
+          userId: user.uid
+        }, { merge: true });
         setPayments(prev => prev.map(p => p.id === payment.id ? updated : p));
       } catch (err) {
         console.error('Failed to update payment:', err);
@@ -641,11 +750,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deletePayment = async (id: string) => {
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/payments/${id}`, {
-          method: 'DELETE'
-        });
+        await deleteDoc(doc(db, 'payments', id));
         setPayments(prev => prev.filter(p => p.id !== id));
       } catch (err) {
         console.error('Failed to delete payment:', err);
@@ -665,11 +772,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth('/api/maintenance', {
-          method: 'POST',
-          body: JSON.stringify(newMaint),
+        await setDoc(doc(db, 'maintenance', newMaint.id), {
+          ...newMaint,
+          userId: user.uid
         });
         setMaintenance(prev => [newMaint, ...prev]);
       } catch (err) {
@@ -685,12 +792,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...request,
       updatedAt: new Date().toISOString()
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/maintenance/${request.id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updated),
-        });
+        await setDoc(doc(db, 'maintenance', request.id), {
+          ...updated,
+          userId: user.uid
+        }, { merge: true });
         setMaintenance(prev => prev.map(m => m.id === request.id ? updated : m));
       } catch (err) {
         console.error('Failed to update maintenance request:', err);
@@ -701,11 +808,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteMaintenance = async (id: string) => {
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/maintenance/${id}`, {
-          method: 'DELETE'
-        });
+        await deleteDoc(doc(db, 'maintenance', id));
         setMaintenance(prev => prev.filter(m => m.id !== id));
       } catch (err) {
         console.error('Failed to delete maintenance request:', err);
@@ -723,11 +828,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...notif,
       createdAt: new Date().toISOString()
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth('/api/notifications', {
-          method: 'POST',
-          body: JSON.stringify(newNotif),
+        await setDoc(doc(db, 'notifications', newNotif.id), {
+          ...newNotif,
+          userId: user.uid
         });
         setNotifications(prev => [newNotif, ...prev]);
       } catch (err) {
@@ -746,12 +851,12 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       ...match,
       status: 'Read'
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/notifications/${id}`, {
-          method: 'PUT',
-          body: JSON.stringify(updated),
-        });
+        await setDoc(doc(db, 'notifications', id), {
+          ...updated,
+          userId: user.uid
+        }, { merge: true });
         setNotifications(prev => prev.map(n => n.id === id ? updated : n));
       } catch (err) {
         console.error('Failed to mark notification as read:', err);
@@ -762,11 +867,15 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const clearAllNotifications = async () => {
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth('/api/notifications', {
-          method: 'DELETE'
+        const q = query(collection(db, 'notifications'), where('userId', '==', user.uid));
+        const snap = await getDocs(q);
+        const batch = writeBatch(db);
+        snap.docs.forEach(d => {
+          batch.delete(d.ref);
         });
+        await batch.commit();
         setNotifications([]);
       } catch (err) {
         console.error('Failed to clear notifications:', err);
@@ -786,11 +895,11 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth('/api/documents', {
-          method: 'POST',
-          body: JSON.stringify(newDoc),
+        await setDoc(doc(db, 'documents', newDoc.id), {
+          ...newDoc,
+          userId: user.uid
         });
         setDocuments(prev => [newDoc, ...prev]);
       } catch (err) {
@@ -802,11 +911,9 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   };
 
   const deleteDocument = async (id: string) => {
-    if (user || isGuest) {
+    if (user) {
       try {
-        await fetchWithAuth(`/api/documents/${id}`, {
-          method: 'DELETE'
-        });
+        await deleteDoc(doc(db, 'documents', id));
         setDocuments(prev => prev.filter(d => d.id !== id));
       } catch (err) {
         console.error('Failed to delete document:', err);

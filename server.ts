@@ -1,21 +1,8 @@
 import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
-import { eq, and, or, isNull } from 'drizzle-orm';
-import { db } from './src/db/index.ts';
-import { 
-  properties, 
-  units, 
-  tenants, 
-  leases, 
-  payments, 
-  maintenance, 
-  notifications, 
-  documents 
-} from './src/db/schema.ts';
+import { adminDb } from './src/db/firebase-admin.ts';
 import { requireAuth } from './src/middleware/auth.ts';
-
-// Import seed data
 import { 
   DEFAULT_PROPERTIES, 
   DEFAULT_UNITS, 
@@ -33,107 +20,75 @@ async function startServer() {
 
   app.use(express.json());
 
+  // Firestore Collection names
+  const COLLECTIONS = {
+    properties: 'properties',
+    units: 'units',
+    tenants: 'tenants',
+    leases: 'leases',
+    payments: 'payments',
+    maintenance: 'maintenance',
+    notifications: 'notifications',
+    documents: 'documents'
+  };
+
   // HEALTH CHECK
   app.get('/api/health', (req, res) => {
-    res.json({ status: 'ok', database: 'postgres_cloud_sql' });
+    res.json({ status: 'ok', database: 'firestore' });
   });
 
   // SEED DATABASE
   app.post('/api/seed', requireAuth, async (req: any, res) => {
     try {
       const userId = req.user?.uid || 'guest_user';
-      console.log(`Seeding database with default data for user ${userId}...`);
+      console.log(`Seeding Firestore with default data for user ${userId}...`);
       
-      // Clear current user's tables and any orphan null-userId rows first to avoid key conflicts
-      await db.delete(documents).where(or(eq(documents.userId, userId), isNull(documents.userId)));
-      await db.delete(notifications).where(or(eq(notifications.userId, userId), isNull(notifications.userId)));
-      await db.delete(maintenance).where(or(eq(maintenance.userId, userId), isNull(maintenance.userId)));
-      await db.delete(payments).where(or(eq(payments.userId, userId), isNull(payments.userId)));
-      await db.delete(leases).where(or(eq(leases.userId, userId), isNull(leases.userId)));
-      await db.delete(units).where(or(eq(units.userId, userId), isNull(units.userId)));
-      await db.delete(tenants).where(or(eq(tenants.userId, userId), isNull(tenants.userId)));
-      await db.delete(properties).where(or(eq(properties.userId, userId), isNull(properties.userId)));
+      // Clear current user's collections first to avoid conflict and keep database pristine
+      await Promise.all(
+        Object.values(COLLECTIONS).map(async (collName) => {
+          const snapshot = await adminDb.collection(collName).get();
+          const batch = adminDb.batch();
+          let count = 0;
+          snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.userId === userId || !data.userId) {
+              batch.delete(doc.ref);
+              count++;
+            }
+          });
+          if (count > 0) {
+            await batch.commit();
+          }
+        })
+      );
 
       const nowStr = new Date().toISOString();
 
-      // Insert Properties
-      if (DEFAULT_PROPERTIES.length > 0) {
-        await db.insert(properties).values(DEFAULT_PROPERTIES.map(p => ({
-          ...p,
-          userId,
-          createdAt: p.createdAt || nowStr,
-          updatedAt: p.updatedAt || nowStr
-        })));
-      }
+      const seeds = [
+        { coll: COLLECTIONS.properties, items: DEFAULT_PROPERTIES },
+        { coll: COLLECTIONS.tenants, items: DEFAULT_TENANTS },
+        { coll: COLLECTIONS.units, items: DEFAULT_UNITS },
+        { coll: COLLECTIONS.leases, items: DEFAULT_LEASES.map(l => ({ ...l, renewalHistory: l.renewalHistory || null })) },
+        { coll: COLLECTIONS.payments, items: DEFAULT_PAYMENTS },
+        { coll: COLLECTIONS.maintenance, items: DEFAULT_MAINTENANCE },
+        { coll: COLLECTIONS.notifications, items: DEFAULT_NOTIFICATIONS },
+        { coll: COLLECTIONS.documents, items: DEFAULT_DOCUMENTS || [] }
+      ];
 
-      // Insert Tenants
-      if (DEFAULT_TENANTS.length > 0) {
-        await db.insert(tenants).values(DEFAULT_TENANTS.map(t => ({
-          ...t,
-          userId,
-          createdAt: t.createdAt || nowStr,
-          updatedAt: t.updatedAt || nowStr
-        })));
-      }
-
-      // Insert Units
-      if (DEFAULT_UNITS.length > 0) {
-        await db.insert(units).values(DEFAULT_UNITS.map(u => ({
-          ...u,
-          userId,
-          createdAt: u.createdAt || nowStr,
-          updatedAt: u.updatedAt || nowStr
-        })));
-      }
-
-      // Insert Leases
-      if (DEFAULT_LEASES.length > 0) {
-        await db.insert(leases).values(DEFAULT_LEASES.map(l => ({
-          ...l,
-          userId,
-          renewalHistory: l.renewalHistory || null,
-          createdAt: l.createdAt || nowStr,
-          updatedAt: l.updatedAt || nowStr
-        })));
-      }
-
-      // Insert Payments
-      if (DEFAULT_PAYMENTS.length > 0) {
-        await db.insert(payments).values(DEFAULT_PAYMENTS.map(p => ({
-          ...p,
-          userId,
-          createdAt: p.createdAt || nowStr,
-          updatedAt: p.updatedAt || nowStr
-        })));
-      }
-
-      // Insert Maintenance
-      if (DEFAULT_MAINTENANCE.length > 0) {
-        await db.insert(maintenance).values(DEFAULT_MAINTENANCE.map(m => ({
-          ...m,
-          userId,
-          createdAt: m.createdAt || nowStr,
-          updatedAt: m.updatedAt || nowStr
-        })));
-      }
-
-      // Insert Notifications
-      if (DEFAULT_NOTIFICATIONS.length > 0) {
-        await db.insert(notifications).values(DEFAULT_NOTIFICATIONS.map(n => ({
-          ...n,
-          userId,
-          createdAt: n.createdAt || nowStr
-        })));
-      }
-
-      // Insert Documents
-      if (DEFAULT_DOCUMENTS && DEFAULT_DOCUMENTS.length > 0) {
-        await db.insert(documents).values(DEFAULT_DOCUMENTS.map(d => ({
-          ...d,
-          userId,
-          createdAt: d.createdAt || nowStr,
-          updatedAt: d.updatedAt || nowStr
-        })));
+      for (const seed of seeds) {
+        if (seed.items && seed.items.length > 0) {
+          const batch = adminDb.batch();
+          seed.items.forEach((item: any) => {
+            const docRef = adminDb.collection(seed.coll).doc(item.id);
+            batch.set(docRef, {
+              ...item,
+              userId,
+              createdAt: item.createdAt || nowStr,
+              updatedAt: item.updatedAt || nowStr
+            });
+          });
+          await batch.commit();
+        }
       }
 
       res.json({ message: 'Database seeded successfully' });
@@ -147,15 +102,24 @@ async function startServer() {
   app.post('/api/clear', requireAuth, async (req: any, res) => {
     try {
       const userId = req.user?.uid || 'guest_user';
-      console.log(`Clearing database tables for user ${userId}...`);
-      await db.delete(documents).where(or(eq(documents.userId, userId), isNull(documents.userId)));
-      await db.delete(notifications).where(or(eq(notifications.userId, userId), isNull(notifications.userId)));
-      await db.delete(maintenance).where(or(eq(maintenance.userId, userId), isNull(maintenance.userId)));
-      await db.delete(payments).where(or(eq(payments.userId, userId), isNull(payments.userId)));
-      await db.delete(leases).where(or(eq(leases.userId, userId), isNull(leases.userId)));
-      await db.delete(units).where(or(eq(units.userId, userId), isNull(units.userId)));
-      await db.delete(tenants).where(or(eq(tenants.userId, userId), isNull(tenants.userId)));
-      await db.delete(properties).where(or(eq(properties.userId, userId), isNull(properties.userId)));
+      console.log(`Clearing Firestore collections for user ${userId}...`);
+      await Promise.all(
+        Object.values(COLLECTIONS).map(async (collName) => {
+          const snapshot = await adminDb.collection(collName).get();
+          const batch = adminDb.batch();
+          let count = 0;
+          snapshot.docs.forEach(doc => {
+            const data = doc.data();
+            if (data.userId === userId || !data.userId) {
+              batch.delete(doc.ref);
+              count++;
+            }
+          });
+          if (count > 0) {
+            await batch.commit();
+          }
+        })
+      );
       res.json({ message: 'Database cleared successfully' });
     } catch (error) {
       console.error('Failed to clear database:', error);
@@ -177,14 +141,14 @@ async function startServer() {
         notifsList,
         docsList
       ] = await Promise.all([
-        db.select().from(properties).where(eq(properties.userId, userId)),
-        db.select().from(units).where(eq(units.userId, userId)),
-        db.select().from(tenants).where(eq(tenants.userId, userId)),
-        db.select().from(leases).where(eq(leases.userId, userId)),
-        db.select().from(payments).where(eq(payments.userId, userId)),
-        db.select().from(maintenance).where(eq(maintenance.userId, userId)),
-        db.select().from(notifications).where(eq(notifications.userId, userId)),
-        db.select().from(documents).where(eq(documents.userId, userId))
+        adminDb.collection(COLLECTIONS.properties).where('userId', '==', userId).get().then(s => s.docs.map(d => d.data())),
+        adminDb.collection(COLLECTIONS.units).where('userId', '==', userId).get().then(s => s.docs.map(d => d.data())),
+        adminDb.collection(COLLECTIONS.tenants).where('userId', '==', userId).get().then(s => s.docs.map(d => d.data())),
+        adminDb.collection(COLLECTIONS.leases).where('userId', '==', userId).get().then(s => s.docs.map(d => d.data())),
+        adminDb.collection(COLLECTIONS.payments).where('userId', '==', userId).get().then(s => s.docs.map(d => d.data())),
+        adminDb.collection(COLLECTIONS.maintenance).where('userId', '==', userId).get().then(s => s.docs.map(d => d.data())),
+        adminDb.collection(COLLECTIONS.notifications).where('userId', '==', userId).get().then(s => s.docs.map(d => d.data())),
+        adminDb.collection(COLLECTIONS.documents).where('userId', '==', userId).get().then(s => s.docs.map(d => d.data()))
       ]);
 
       res.json({
@@ -203,358 +167,116 @@ async function startServer() {
     }
   });
 
-  // PROPERTIES CRUD
-  app.get('/api/properties', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const result = await db.select().from(properties).where(eq(properties.userId, userId));
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch properties' });
-    }
-  });
+  // Helper function to create generic CRUD endpoints for Firestore
+  const createCrudRoutes = (endpoint: string, collectionName: string) => {
+    // GET List
+    app.get(`/api/${endpoint}`, requireAuth, async (req: any, res) => {
+      try {
+        const userId = req.user?.uid || 'guest_user';
+        const snapshot = await adminDb.collection(collectionName).where('userId', '==', userId).get();
+        const list = snapshot.docs.map(doc => doc.data());
+        res.json(list);
+      } catch (error) {
+        console.error(`Failed to fetch ${endpoint}:`, error);
+        res.status(500).json({ error: `Failed to fetch ${endpoint}` });
+      }
+    });
 
-  app.post('/api/properties', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        userId,
-        createdAt: nowStr,
-        updatedAt: nowStr
-      };
-      await db.insert(properties).values(payload);
-      res.status(201).json(payload);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to create property' });
-    }
-  });
+    // POST Create
+    app.post(`/api/${endpoint}`, requireAuth, async (req: any, res) => {
+      try {
+        const userId = req.user?.uid || 'guest_user';
+        const nowStr = new Date().toISOString();
+        const id = req.body.id || adminDb.collection(collectionName).doc().id;
+        const payload = {
+          ...req.body,
+          id,
+          userId,
+          createdAt: req.body.createdAt || nowStr,
+          updatedAt: req.body.updatedAt || nowStr
+        };
+        await adminDb.collection(collectionName).doc(id).set(payload);
+        res.status(201).json(payload);
+      } catch (error) {
+        console.error(`Failed to create ${endpoint}:`, error);
+        res.status(500).json({ error: `Failed to create ${endpoint}` });
+      }
+    });
 
-  app.put('/api/properties/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        updatedAt: nowStr
-      };
-      // Omit id and userId from body just to be safe
-      delete payload.id;
-      delete payload.userId;
-      await db.update(properties).set(payload).where(and(eq(properties.id, id), eq(properties.userId, userId)));
-      res.json({ id, ...payload });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update property' });
-    }
-  });
+    // PUT Update
+    app.put(`/api/${endpoint}/:id`, requireAuth, async (req: any, res) => {
+      try {
+        const userId = req.user?.uid || 'guest_user';
+        const { id } = req.params;
+        const nowStr = new Date().toISOString();
+        const payload = {
+          ...req.body,
+          updatedAt: nowStr
+        };
+        delete payload.id;
+        delete payload.userId;
 
-  app.delete('/api/properties/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      await db.delete(properties).where(and(eq(properties.id, id), eq(properties.userId, userId)));
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to delete property' });
-    }
-  });
+        const docRef = adminDb.collection(collectionName).doc(id);
+        const docSnap = await docRef.get();
+        if (!docSnap.exists) {
+          return res.status(404).json({ error: `${endpoint} not found` });
+        }
+        const existingData = docSnap.data();
+        if (existingData?.userId !== userId) {
+          return res.status(403).json({ error: 'Unauthorized to update this record' });
+        }
 
-  // UNITS CRUD
-  app.get('/api/units', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const result = await db.select().from(units).where(eq(units.userId, userId));
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch units' });
-    }
-  });
+        await docRef.update(payload);
+        res.json({ id, ...payload });
+      } catch (error) {
+        console.error(`Failed to update ${endpoint}:`, error);
+        res.status(500).json({ error: `Failed to update ${endpoint}` });
+      }
+    });
 
-  app.post('/api/units', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        userId,
-        createdAt: nowStr,
-        updatedAt: nowStr
-      };
-      await db.insert(units).values(payload);
-      res.status(201).json(payload);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to create unit' });
-    }
-  });
+    // DELETE Remove
+    app.delete(`/api/${endpoint}/:id`, requireAuth, async (req: any, res) => {
+      try {
+        const userId = req.user?.uid || 'guest_user';
+        const { id } = req.params;
 
-  app.put('/api/units/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        updatedAt: nowStr
-      };
-      delete payload.id;
-      delete payload.userId;
-      await db.update(units).set(payload).where(and(eq(units.id, id), eq(units.userId, userId)));
-      res.json({ id, ...payload });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update unit' });
-    }
-  });
+        const docRef = adminDb.collection(collectionName).doc(id);
+        const docSnap = await docRef.get();
+        if (!docSnap.exists) {
+          return res.status(404).json({ error: `${endpoint} not found` });
+        }
+        const existingData = docSnap.data();
+        if (existingData?.userId !== userId) {
+          return res.status(403).json({ error: 'Unauthorized to delete this record' });
+        }
 
-  app.delete('/api/units/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      await db.delete(units).where(and(eq(units.id, id), eq(units.userId, userId)));
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to delete unit' });
-    }
-  });
+        await docRef.delete();
+        res.json({ success: true });
+      } catch (error) {
+        console.error(`Failed to delete ${endpoint}:`, error);
+        res.status(500).json({ error: `Failed to delete ${endpoint}` });
+      }
+    });
+  };
 
-  // TENANTS CRUD
-  app.get('/api/tenants', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const result = await db.select().from(tenants).where(eq(tenants.userId, userId));
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch tenants' });
-    }
-  });
+  // Register standard CRUD routes
+  createCrudRoutes('properties', COLLECTIONS.properties);
+  createCrudRoutes('units', COLLECTIONS.units);
+  createCrudRoutes('tenants', COLLECTIONS.tenants);
+  createCrudRoutes('leases', COLLECTIONS.leases);
+  createCrudRoutes('payments', COLLECTIONS.payments);
+  createCrudRoutes('maintenance', COLLECTIONS.maintenance);
+  createCrudRoutes('documents', COLLECTIONS.documents);
 
-  app.post('/api/tenants', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        userId,
-        createdAt: nowStr,
-        updatedAt: nowStr
-      };
-      await db.insert(tenants).values(payload);
-      res.status(201).json(payload);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to create tenant' });
-    }
-  });
-
-  app.put('/api/tenants/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        updatedAt: nowStr
-      };
-      delete payload.id;
-      delete payload.userId;
-      await db.update(tenants).set(payload).where(and(eq(tenants.id, id), eq(tenants.userId, userId)));
-      res.json({ id, ...payload });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update tenant' });
-    }
-  });
-
-  app.delete('/api/tenants/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      await db.delete(tenants).where(and(eq(tenants.id, id), eq(tenants.userId, userId)));
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to delete tenant' });
-    }
-  });
-
-  // LEASES CRUD
-  app.get('/api/leases', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const result = await db.select().from(leases).where(eq(leases.userId, userId));
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch leases' });
-    }
-  });
-
-  app.post('/api/leases', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        userId,
-        renewalHistory: req.body.renewalHistory || null,
-        createdAt: nowStr,
-        updatedAt: nowStr
-      };
-      await db.insert(leases).values(payload);
-      res.status(201).json(payload);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to create lease' });
-    }
-  });
-
-  app.put('/api/leases/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        renewalHistory: req.body.renewalHistory || null,
-        updatedAt: nowStr
-      };
-      delete payload.id;
-      delete payload.userId;
-      await db.update(leases).set(payload).where(and(eq(leases.id, id), eq(leases.userId, userId)));
-      res.json({ id, ...payload });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update lease' });
-    }
-  });
-
-  app.delete('/api/leases/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      await db.delete(leases).where(and(eq(leases.id, id), eq(leases.userId, userId)));
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to delete lease' });
-    }
-  });
-
-  // PAYMENTS CRUD
-  app.get('/api/payments', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const result = await db.select().from(payments).where(eq(payments.userId, userId));
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch payments' });
-    }
-  });
-
-  app.post('/api/payments', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        userId,
-        createdAt: nowStr,
-        updatedAt: nowStr
-      };
-      await db.insert(payments).values(payload);
-      res.status(201).json(payload);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to create payment' });
-    }
-  });
-
-  app.put('/api/payments/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        updatedAt: nowStr
-      };
-      delete payload.id;
-      delete payload.userId;
-      await db.update(payments).set(payload).where(and(eq(payments.id, id), eq(payments.userId, userId)));
-      res.json({ id, ...payload });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update payment' });
-    }
-  });
-
-  app.delete('/api/payments/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      await db.delete(payments).where(and(eq(payments.id, id), eq(payments.userId, userId)));
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to delete payment' });
-    }
-  });
-
-  // MAINTENANCE CRUD
-  app.get('/api/maintenance', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const result = await db.select().from(maintenance).where(eq(maintenance.userId, userId));
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch maintenance requests' });
-    }
-  });
-
-  app.post('/api/maintenance', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        userId,
-        createdAt: nowStr,
-        updatedAt: nowStr
-      };
-      await db.insert(maintenance).values(payload);
-      res.status(201).json(payload);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to create maintenance request' });
-    }
-  });
-
-  app.put('/api/maintenance/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        updatedAt: nowStr
-      };
-      delete payload.id;
-      delete payload.userId;
-      await db.update(maintenance).set(payload).where(and(eq(maintenance.id, id), eq(maintenance.userId, userId)));
-      res.json({ id, ...payload });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to update maintenance request' });
-    }
-  });
-
-  app.delete('/api/maintenance/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      await db.delete(maintenance).where(and(eq(maintenance.id, id), eq(maintenance.userId, userId)));
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to delete maintenance request' });
-    }
-  });
-
-  // NOTIFICATIONS CRUD
+  // Special notification routes
   app.get('/api/notifications', requireAuth, async (req: any, res) => {
     try {
       const userId = req.user?.uid || 'guest_user';
-      const result = await db.select().from(notifications).where(eq(notifications.userId, userId));
-      res.json(result);
+      const snapshot = await adminDb.collection(COLLECTIONS.notifications).where('userId', '==', userId).get();
+      const list = snapshot.docs.map(doc => doc.data());
+      res.json(list);
     } catch (error) {
+      console.error('Failed to fetch notifications:', error);
       res.status(500).json({ error: 'Failed to fetch notifications' });
     }
   });
@@ -563,14 +285,17 @@ async function startServer() {
     try {
       const userId = req.user?.uid || 'guest_user';
       const nowStr = new Date().toISOString();
+      const id = req.body.id || adminDb.collection(COLLECTIONS.notifications).doc().id;
       const payload = {
         ...req.body,
+        id,
         userId,
-        createdAt: nowStr
+        createdAt: req.body.createdAt || nowStr
       };
-      await db.insert(notifications).values(payload);
+      await adminDb.collection(COLLECTIONS.notifications).doc(id).set(payload);
       res.status(201).json(payload);
     } catch (error) {
+      console.error('Failed to create notification:', error);
       res.status(500).json({ error: 'Failed to create notification' });
     }
   });
@@ -584,9 +309,21 @@ async function startServer() {
       };
       delete payload.id;
       delete payload.userId;
-      await db.update(notifications).set(payload).where(and(eq(notifications.id, id), eq(notifications.userId, userId)));
+
+      const docRef = adminDb.collection(COLLECTIONS.notifications).doc(id);
+      const docSnap = await docRef.get();
+      if (!docSnap.exists) {
+        return res.status(404).json({ error: 'Notification not found' });
+      }
+      const existingData = docSnap.data();
+      if (existingData?.userId !== userId) {
+        return res.status(403).json({ error: 'Unauthorized to update this notification' });
+      }
+
+      await docRef.update(payload);
       res.json({ id, ...payload });
     } catch (error) {
+      console.error('Failed to update notification:', error);
       res.status(500).json({ error: 'Failed to update notification' });
     }
   });
@@ -594,49 +331,16 @@ async function startServer() {
   app.delete('/api/notifications', requireAuth, async (req: any, res) => {
     try {
       const userId = req.user?.uid || 'guest_user';
-      await db.delete(notifications).where(eq(notifications.userId, userId));
+      const snapshot = await adminDb.collection(COLLECTIONS.notifications).where('userId', '==', userId).get();
+      const batch = adminDb.batch();
+      snapshot.docs.forEach(doc => {
+        batch.delete(doc.ref);
+      });
+      await batch.commit();
       res.json({ success: true });
     } catch (error) {
+      console.error('Failed to clear notifications:', error);
       res.status(500).json({ error: 'Failed to clear notifications' });
-    }
-  });
-
-  // DOCUMENTS CRUD
-  app.get('/api/documents', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const result = await db.select().from(documents).where(eq(documents.userId, userId));
-      res.json(result);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to fetch documents' });
-    }
-  });
-
-  app.post('/api/documents', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const nowStr = new Date().toISOString();
-      const payload = {
-        ...req.body,
-        userId,
-        createdAt: nowStr,
-        updatedAt: nowStr
-      };
-      await db.insert(documents).values(payload);
-      res.status(201).json(payload);
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to create document record' });
-    }
-  });
-
-  app.delete('/api/documents/:id', requireAuth, async (req: any, res) => {
-    try {
-      const userId = req.user?.uid || 'guest_user';
-      const { id } = req.params;
-      await db.delete(documents).where(and(eq(documents.id, id), eq(documents.userId, userId)));
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: 'Failed to delete document record' });
     }
   });
 
