@@ -13,7 +13,7 @@ service cloud.firestore {
     }
     
     function isVerified() {
-      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.email != null) && request.auth.token.email == "yared.abegaz@gmail.com";
+      return isSignedIn() && (request.auth.token.email_verified == true || request.auth.token.email != null) && request.auth.token.email == "devmeron528@gmail.com";
     }
 
     function isValidId(id) {
@@ -37,8 +37,8 @@ service cloud.firestore {
         && data.address is string && data.address.size() > 0 && data.address.size() <= 300
         && data.type is string && (data.type == 'Commercial' || data.type == 'Office' || data.type == 'Retail' || data.type == 'Industrial' || data.type == 'Residential')
         && data.createdAt is string && data.updatedAt is string
-        && (data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() <= 1024))
-        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1024))
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidUnit(data) {
@@ -53,8 +53,8 @@ service cloud.firestore {
         && data.monthlyRent is number && data.monthlyRent >= 0
         && data.occupancyStatus is string && (data.occupancyStatus == 'Occupied' || data.occupancyStatus == 'Vacant' || data.occupancyStatus == 'Reserved' || data.occupancyStatus == 'Maintenance')
         && data.createdAt is string && data.updatedAt is string
-        && (data.tenantId == null || (data.tenantId is string && data.tenantId.size() <= 128))
-        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
+        && (!('tenantId' in data) || (data.tenantId is string && data.tenantId.size() <= 128))
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidTenant(data) {
@@ -69,7 +69,7 @@ service cloud.firestore {
         && data.emergencyContactName is string && data.emergencyContactName.size() <= 200
         && data.emergencyContactPhone is string && data.emergencyContactPhone.size() <= 32
         && data.createdAt is string && data.updatedAt is string
-        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidLease(data) {
@@ -85,11 +85,11 @@ service cloud.firestore {
         && data.startDate is string && data.startDate.size() <= 32
         && data.endDate is string && data.endDate.size() <= 32
         && data.monthlyRent is number && data.monthlyRent >= 0
-        && (data.depositAmount == null || data.depositAmount is number)
+        && (!('depositAmount' in data) || data.depositAmount is number)
         && data.status is string && (data.status == 'Active' || data.status == 'Pending' || data.status == 'Expired' || data.status == 'Terminated')
         && data.createdAt is string && data.updatedAt is string
-        && (data.renewalHistory == null || data.renewalHistory is list)
-        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
+        && (!('renewalHistory' in data) || data.renewalHistory is list)
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidPayment(data) {
@@ -107,11 +107,11 @@ service cloud.firestore {
         && data.amountPaid is number && data.amountPaid >= 0
         && data.paymentStatus is string && (data.paymentStatus == 'Paid' || data.paymentStatus == 'Partially Paid' || data.paymentStatus == 'Overdue' || data.paymentStatus == 'Unpaid')
         && data.createdAt is string && data.updatedAt is string
-        && (data.paymentDate == null || data.paymentDate is string)
-        && (data.paymentMethod == null || data.paymentMethod is string)
-        && (data.receiptNumber == null || data.receiptNumber is string)
-        && (data.notes == null || data.notes is string)
-        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
+        && (!('paymentDate' in data) || data.paymentDate is string)
+        && (!('paymentMethod' in data) || data.paymentMethod is string)
+        && (!('receiptNumber' in data) || data.receiptNumber is string)
+        && (!('notes' in data) || data.notes is string)
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidMaintenanceRequest(data) {
@@ -127,9 +127,9 @@ service cloud.firestore {
         && data.priority is string && (data.priority == 'Low' || data.priority == 'Medium' || data.priority == 'High' || data.priority == 'Emergency')
         && data.status is string && (data.status == 'New' || data.status == 'In Progress' || data.status == 'On Hold' || data.status == 'Completed')
         && data.createdAt is string && data.updatedAt is string
-        && (data.assignedContractor == null || data.assignedContractor is string)
-        && (data.cost == null || data.cost is number)
-        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
+        && (!('assignedContractor' in data) || data.assignedContractor is string)
+        && (!('cost' in data) || data.cost is number)
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidNotification(data) {
@@ -141,7 +141,7 @@ service cloud.firestore {
         && data.type is string && data.type.size() <= 64
         && data.createdAt is string
         && data.status is string && (data.status == 'Unread' || data.status == 'Read')
-        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
     }
 
     function isValidDocument(data) {
@@ -155,10 +155,10 @@ service cloud.firestore {
         && data.fileName is string && data.fileName.size() <= 200
         && data.url is string && data.url.size() <= 1024
         && data.createdAt is string && data.updatedAt is string
-        && (data.fileType == null || data.fileType is string)
-        && (data.fileSize == null || data.fileSize is number)
-        && (data.expiryDate == null || data.expiryDate is string)
-        && (data.userId == null || (data.userId is string && data.userId.size() <= 128));
+        && (!('fileType' in data) || data.fileType is string)
+        && (!('fileSize' in data) || data.fileSize is number)
+        && (!('expiryDate' in data) || data.expiryDate is string)
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
     }
 
     // Map matches to Collections
