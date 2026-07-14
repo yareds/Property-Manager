@@ -707,7 +707,7 @@ export default function App() {
                   maintenance={maintenance}
                   onNavigate={handleTabChange}
                   isGuest={isGuest}
-                  onSeed={seedDatabase}
+                  onSeed={isGuest ? seedDatabase : undefined}
                 />
               )}
 

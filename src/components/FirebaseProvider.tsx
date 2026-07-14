@@ -293,39 +293,14 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
               loadColl('documents')
             ]);
 
-            // Auto-seed if the database is empty for this user
-            if (propsData.length === 0) {
-              console.log("Database is empty, auto-seeding sample records...");
-              await seedDatabaseDirect(uid);
-              // Reload
-              const [p, u, t, l, pay, m, n, d] = await Promise.all([
-                loadColl('properties'),
-                loadColl('units'),
-                loadColl('tenants'),
-                loadColl('leases'),
-                loadColl('payments'),
-                loadColl('maintenance'),
-                loadColl('notifications'),
-                loadColl('documents')
-              ]);
-              setProperties(p.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Property[]);
-              setUnits(u.sort((a: any, b: any) => a.unitNumber.localeCompare(b.unitNumber)) as Unit[]);
-              setTenants(t.sort((a: any, b: any) => a.businessName.localeCompare(b.businessName)) as Tenant[]);
-              setLeases(l.sort((a: any, b: any) => b.endDate.localeCompare(a.endDate)) as Lease[]);
-              setPayments(pay.sort((a: any, b: any) => b.dueDate.localeCompare(a.dueDate)) as Payment[]);
-              setMaintenance(m.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as MaintenanceRequest[]);
-              setNotifications(n.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Notification[]);
-              setDocuments(d.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Document[]);
-            } else {
-              setProperties(propsData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Property[]);
-              setUnits(unitsData.sort((a: any, b: any) => a.unitNumber.localeCompare(b.unitNumber)) as Unit[]);
-              setTenants(tenantsData.sort((a: any, b: any) => a.businessName.localeCompare(b.businessName)) as Tenant[]);
-              setLeases(leasesData.sort((a: any, b: any) => b.endDate.localeCompare(a.endDate)) as Lease[]);
-              setPayments(paymentsData.sort((a: any, b: any) => b.dueDate.localeCompare(a.dueDate)) as Payment[]);
-              setMaintenance(maintData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as MaintenanceRequest[]);
-              setNotifications(notifData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Notification[]);
-              setDocuments(docsData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Document[]);
-            }
+            setProperties(propsData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Property[]);
+            setUnits(unitsData.sort((a: any, b: any) => a.unitNumber.localeCompare(b.unitNumber)) as Unit[]);
+            setTenants(tenantsData.sort((a: any, b: any) => a.businessName.localeCompare(b.businessName)) as Tenant[]);
+            setLeases(leasesData.sort((a: any, b: any) => b.endDate.localeCompare(a.endDate)) as Lease[]);
+            setPayments(paymentsData.sort((a: any, b: any) => b.dueDate.localeCompare(a.dueDate)) as Payment[]);
+            setMaintenance(maintData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as MaintenanceRequest[]);
+            setNotifications(notifData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Notification[]);
+            setDocuments(docsData.sort((a: any, b: any) => b.createdAt.localeCompare(a.createdAt)) as Document[]);
           } else if (isGuest) {
             setProperties(getLocalStorageData('pm_properties', DEFAULT_PROPERTIES));
             setUnits(getLocalStorageData('pm_units', DEFAULT_UNITS));
