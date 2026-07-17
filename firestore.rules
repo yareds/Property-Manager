@@ -94,7 +94,7 @@ service cloud.firestore {
 
     function isValidPayment(data) {
       return data.keys().hasAll(['id', 'tenantId', 'businessName', 'leaseId', 'propertyId', 'unitId', 'unitNumber', 'dueDate', 'amountDue', 'amountPaid', 'paymentStatus', 'createdAt', 'updatedAt'])
-        && data.keys().size() <= 18
+        && data.keys().size() <= 24
         && data.id is string && data.id.size() <= 128
         && data.tenantId is string && data.tenantId.size() <= 128
         && data.businessName is string && data.businessName.size() <= 200
@@ -111,6 +111,11 @@ service cloud.firestore {
         && (!('paymentMethod' in data) || data.paymentMethod is string)
         && (!('receiptNumber' in data) || data.receiptNumber is string)
         && (!('notes' in data) || data.notes is string)
+        && (!('propertyName' in data) || (data.propertyName is string && data.propertyName.size() <= 200))
+        && (!('prepaymentPeriod' in data) || (data.prepaymentPeriod is string && data.prepaymentPeriod.size() <= 64))
+        && (!('prepaymentMonths' in data) || (data.prepaymentMonths is number && data.prepaymentMonths >= 0))
+        && (!('rentPeriodStart' in data) || (data.rentPeriodStart is string && data.rentPeriodStart.size() <= 32))
+        && (!('rentPeriodEnd' in data) || (data.rentPeriodEnd is string && data.rentPeriodEnd.size() <= 32))
         && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
     }
 

@@ -1,11 +1,41 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeAppCheck, ReCaptchaV3Provider, CustomProvider } from 'firebase/app-check';
 import firebaseConfig from '../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId); /* CRITICAL: The app will break without this line */
 export const auth = getAuth(app);
+
+// Enable Firebase App Check with support for development and production
+export let appCheck: any = null;
+if (typeof window !== 'undefined') {
+  // If we are not in production, we can use the debug token for security rules testing / local development
+  if ((import.meta as any).env.MODE !== 'production' || (import.meta as any).env.DEV) {
+    (window as any).FIREBASE_APPCHECK_DEBUG_TOKEN = true;
+  }
+  
+  try {
+    const siteKey = (import.meta as any).env.VITE_RECAPTCHA_SITE_KEY;
+    
+    // If we have a custom site key configured, use the standard ReCaptchaV3Provider
+    if (siteKey) {
+      appCheck = initializeAppCheck(app, {
+        provider: new ReCaptchaV3Provider(siteKey),
+        isTokenAutoRefreshEnabled: true
+      });
+      console.log('Firebase App Check successfully initialized with ReCaptchaV3.');
+    } else {
+      // In sandbox, iframe, or development environments where recaptcha site key is not configured,
+      // we do not initialize App Check. This prevents Firebase Auth from requesting App Check tokens
+      // and completely eliminates HTTP 403 fetch server error warnings.
+      console.log('Firebase App Check is inactive (awaiting VITE_RECAPTCHA_SITE_KEY configuration). Security remains fully enforced by Firestore Rules.');
+    }
+  } catch (error) {
+    console.warn('Firebase App Check failed to initialize (this is expected in some iframe/sandbox environments):', error);
+  }
+}
 
 export const googleProvider = new GoogleAuthProvider();
 

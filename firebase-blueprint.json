@@ -95,6 +95,11 @@
         "paymentMethod": { "type": "string" },
         "receiptNumber": { "type": "string" },
         "notes": { "type": "string" },
+        "propertyName": { "type": "string" },
+        "prepaymentPeriod": { "type": "string" },
+        "prepaymentMonths": { "type": "number" },
+        "rentPeriodStart": { "type": "string" },
+        "rentPeriodEnd": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" },
         "updatedAt": { "type": "string", "format": "date-time" }
       },

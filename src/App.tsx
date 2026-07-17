@@ -67,6 +67,7 @@ export default function App() {
     deleteMaintenance,
     markNotificationAsRead,
     clearAllNotifications,
+    addNotification,
     addDocument,
     deleteDocument,
     seedDatabase,
@@ -77,6 +78,67 @@ export default function App() {
   const [showNotifMenu, setShowNotifMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [selectedMonthlyKey, setSelectedMonthlyKey] = useState<string | null>(null);
+
+  // Server-side Compliance & App Check Status state
+  const [backendAuditing, setBackendAuditing] = useState(false);
+  const [backendAuditResult, setBackendAuditResult] = useState<{
+    success: boolean;
+    dispatchedCount?: number;
+    timestamp?: string;
+    error?: string;
+  } | null>(null);
+
+  const triggerBackendAudit = async () => {
+    setBackendAuditing(true);
+    setBackendAuditResult(null);
+    try {
+      const response = await fetch('/api/compliance-check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          payments,
+          leases,
+          userEmail: user?.email || 'yared.abegaz@gmail.com',
+        }),
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setBackendAuditResult({
+          success: true,
+          dispatchedCount: data.dispatchedNotifications?.length || 0,
+          timestamp: data.auditTimestamp,
+        });
+        
+        // Dispatch notifications from server audit securely to the client
+        if (data.dispatchedNotifications && data.dispatchedNotifications.length > 0) {
+          for (const notif of data.dispatchedNotifications) {
+            if (!notifications.some(n => n.id === notif.id)) {
+              await addNotification({
+                id: notif.id,
+                title: notif.title,
+                message: notif.message,
+                type: notif.type,
+                status: notif.status,
+                userId: user?.uid || 'guest-user',
+              });
+            }
+          }
+        }
+      } else {
+        setBackendAuditResult({
+          success: false,
+          error: data.error || 'Server rejected audit request',
+        });
+      }
+    } catch (err: any) {
+      setBackendAuditResult({
+        success: false,
+        error: err.message || 'Server connection failed',
+      });
+    } finally {
+      setBackendAuditing(false);
+    }
+  };
 
   // Filter notifications: rent dues must be rent_overdue only, and only when near lease renewal (within 30 days of end date).
   const filteredNotifications = notifications.filter(n => {
@@ -718,6 +780,39 @@ export default function App() {
                             No notifications dispatched. All portfolios compliant.
                           </div>
                         )}
+                      </div>
+
+                      {/* Backend Security Audit Action */}
+                      <div className="p-3 bg-slate-50 border-t border-slate-100 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Secured Server Sync</span>
+                          <span className="h-1.5 w-1.5 rounded-full bg-indigo-500"></span>
+                        </div>
+                        <p className="text-[10px] text-slate-400 leading-normal">
+                          Run real-time compliance checking on safe cloud environments to identify anomalies.
+                        </p>
+                        
+                        {backendAuditResult && (
+                          <div className={`p-2 rounded text-[10px] ${
+                            backendAuditResult.success ? 'bg-emerald-50 text-emerald-800 border border-emerald-100' : 'bg-red-50 text-red-800 border border-red-100'
+                          }`}>
+                            {backendAuditResult.success ? (
+                              <p>
+                                <strong>Audit Complete:</strong> Portfolios synchronized. Found {backendAuditResult.dispatchedCount} issues requiring action.
+                              </p>
+                            ) : (
+                              <p><strong>Audit Failed:</strong> {backendAuditResult.error}</p>
+                            )}
+                          </div>
+                        )}
+
+                        <button
+                          onClick={triggerBackendAudit}
+                          disabled={backendAuditing}
+                          className="w-full text-center py-1.5 text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-100 hover:bg-indigo-100 rounded transition disabled:opacity-50 cursor-pointer"
+                        >
+                          {backendAuditing ? 'Auditing and Securing...' : 'Trigger Secure Backend Audit'}
+                        </button>
                       </div>
                     </motion.div>
                   </>
