@@ -66,6 +66,7 @@ export interface Payment {
   businessName: string;
   leaseId: string;
   propertyId: string;
+  propertyName?: string;
   unitId: string;
   unitNumber: string;
   dueDate: string;
@@ -76,6 +77,10 @@ export interface Payment {
   paymentMethod?: string;
   receiptNumber?: string;
   notes?: string;
+  prepaymentPeriod?: string;
+  prepaymentMonths?: number;
+  rentPeriodStart?: string;
+  rentPeriodEnd?: string;
   createdAt: string;
   updatedAt: string;
 }

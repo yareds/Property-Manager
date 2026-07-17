@@ -78,8 +78,30 @@ export default function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [selectedMonthlyKey, setSelectedMonthlyKey] = useState<string | null>(null);
 
-  // Unread notification count
-  const unreadNotifs = notifications.filter(n => n.status === 'Unread');
+  // Filter notifications: rent dues must be rent_overdue only, and only when near lease renewal (within 30 days of end date).
+  const filteredNotifications = notifications.filter(n => {
+    if (n.type === 'payment_received') {
+      // payment_received is a rent due/payment notification but it's not overdue! So hide it.
+      return false;
+    }
+    if (n.type === 'rent_overdue') {
+      const lease = leases.find(l => 
+        n.message.toLowerCase().includes(l.businessName.toLowerCase()) ||
+        n.title.toLowerCase().includes(l.businessName.toLowerCase()) ||
+        l.businessName.toLowerCase().includes(n.title.toLowerCase())
+      );
+      if (!lease) return false;
+      const end = new Date(lease.endDate);
+      const now = new Date();
+      const diffTime = end.getTime() - now.getTime();
+      const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+      return diffDays <= 30; // near lease renewal
+    }
+    return true; // Keep other notifications (lease_expiration, system, document_expiry, etc.)
+  });
+
+  // Unread notification count using filtered notifications
+  const unreadNotifs = filteredNotifications.filter(n => n.status === 'Unread');
 
   // Extract events grouped by month (reverse chronological)
   const getMonthlyEvents = () => {
@@ -150,8 +172,8 @@ export default function App() {
       monthlyData[monthKey].totalAlerts++;
     };
 
-    // 1. System Notifications
-    notifications.forEach(n => {
+    // 1. System Notifications (using filteredNotifications)
+    filteredNotifications.forEach(n => {
       let severity: 'info' | 'warning' | 'error' | 'success' = 'info';
       const typeLower = (n.type || '').toLowerCase();
       if (typeLower.includes('overdue')) severity = 'error';
@@ -160,19 +182,28 @@ export default function App() {
       addEvent(n.createdAt, 'Notification', n.id, n.title, n.message, n.status, severity);
     });
 
-    // 2. Unpaid / Overdue Payments
+    // 2. Overdue Payments (Only show rent dues notification when near lease renewal and overdue only)
     payments.forEach(p => {
-      if (p.paymentStatus !== 'Fully Paid') {
-        const severity = p.paymentStatus === 'Overdue' ? 'error' : 'warning';
-        addEvent(
-          p.dueDate,
-          'Payment',
-          p.id,
-          `Rent ${p.paymentStatus}: ${p.businessName}`,
-          `Unit ${p.unitNumber} rent of Br ${p.amountDue.toLocaleString()} is ${p.paymentStatus}.`,
-          p.paymentStatus,
-          severity
-        );
+      if (p.paymentStatus === 'Overdue') {
+        const lease = leases.find(l => l.id === p.leaseId);
+        if (lease) {
+          const end = new Date(lease.endDate);
+          const now = new Date();
+          const diffTime = end.getTime() - now.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+          
+          if (diffDays <= 30) {
+            addEvent(
+              p.dueDate,
+              'Payment',
+              p.id,
+              `Rent Overdue: ${p.businessName}`,
+              `Unit ${p.unitNumber} rent of Br ${p.amountDue.toLocaleString()} is Overdue (Lease near renewal).`,
+              p.paymentStatus,
+              'error'
+            );
+          }
+        }
       }
     });
 
@@ -426,14 +457,23 @@ export default function App() {
         {/* User profile & controls */}
         <div className="p-4 border-t border-slate-800 space-y-3 bg-slate-950/40">
           {user && (
-            <div className="flex items-center space-x-2 px-1 py-1">
-              <div className="h-7 w-7 rounded-full bg-blue-600 flex items-center justify-center font-bold text-white text-[11px] border border-white/10">
-                {user.displayName?.charAt(0) || user.email?.charAt(0).toUpperCase() || 'L'}
+            <div className="flex items-center justify-between px-1 py-1">
+              <div className="flex items-center space-x-2 truncate">
+                <div className="h-7 w-7 rounded-full bg-indigo-600 flex items-center justify-center font-bold text-white text-[11px] border border-white/10 shrink-0">
+                  {user.displayName?.charAt(0) || user.email?.charAt(0).toUpperCase() || 'L'}
+                </div>
+                <div className="flex flex-col truncate">
+                  <span className="text-[11px] font-bold text-white truncate">{user.displayName || 'Administrator'}</span>
+                  <span className="text-[9px] text-slate-400 truncate font-mono">{user.email}</span>
+                </div>
               </div>
-              <div className="flex flex-col truncate">
-                <span className="text-[11px] font-bold text-white truncate">{user.displayName || 'Administrator'}</span>
-                <span className="text-[9px] text-slate-400 truncate font-mono">{user.email}</span>
-              </div>
+              <button
+                onClick={logout}
+                className="p-1.5 hover:bg-slate-800 rounded text-slate-400 hover:text-red-400 transition shrink-0 cursor-pointer"
+                title="Sign Out"
+              >
+                <LogOut size={14} />
+              </button>
             </div>
           )}
 
@@ -648,7 +688,7 @@ export default function App() {
                       </div>
 
                       <div className="divide-y divide-slate-100 max-h-64 overflow-y-auto">
-                        {notifications.map((n) => (
+                        {filteredNotifications.map((n) => (
                           <div 
                             key={n.id} 
                             onClick={() => {
@@ -673,7 +713,7 @@ export default function App() {
                           </div>
                         ))}
 
-                        {notifications.length === 0 && (
+                        {filteredNotifications.length === 0 && (
                           <div className="p-4 text-center text-slate-400 italic text-[11px]">
                             No notifications dispatched. All portfolios compliant.
                           </div>
@@ -707,7 +747,7 @@ export default function App() {
                   maintenance={maintenance}
                   onNavigate={handleTabChange}
                   isGuest={isGuest}
-                  onSeed={isGuest ? seedDatabase : undefined}
+                  onSeed={seedDatabase}
                 />
               )}
 

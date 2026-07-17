@@ -41,17 +41,64 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
   const [recordModal, setRecordModal] = useState(false);
   const [receiptModal, setReceiptModal] = useState<{ open: boolean; payment: Payment | null }>({ open: false, payment: null });
 
+  // Prepayment durations
+  const PREPAYMENT_OPTIONS = [
+    { label: '1 Month (Standard)', months: 1 },
+    { label: '3 Months', months: 3 },
+    { label: '6 Months', months: 6 },
+    { label: '1 Year', months: 12 },
+    { label: '2 Years', months: 24 },
+    { label: '3 Years', months: 36 },
+    { label: '4 Years', months: 48 },
+    { label: '5 Years', months: 60 },
+    { label: '6 Years', months: 72 },
+    { label: '7 Years', months: 84 },
+  ];
+
   // Record Payment Form state
   const [selectedLeaseId, setSelectedLeaseId] = useState('');
   const [dueDate, setDueDate] = useState('');
+  const [prepaymentPeriod, setPrepaymentPeriod] = useState('1 Month (Standard)');
+  const [rentPeriodStart, setRentPeriodStart] = useState('');
+  const [rentPeriodEnd, setRentPeriodEnd] = useState('');
   const [amountDue, setAmountDue] = useState<number>(1000);
   const [amountPaid, setAmountPaid] = useState<number>(1000);
   const [paymentStatus, setPaymentStatus] = useState<'Paid' | 'Partially Paid' | 'Overdue' | 'Unpaid'>('Paid');
   const [paymentMethod, setPaymentMethod] = useState('ACH/Direct Deposit');
   const [paymentNotes, setPaymentNotes] = useState('');
 
+  // Calculate inclusive end date based on start date and month duration
+  const calculateEndDate = (startDateStr: string, periodLabel: string): string => {
+    if (!startDateStr) return '';
+    const date = new Date(startDateStr);
+    if (isNaN(date.getTime())) return '';
+    
+    const option = PREPAYMENT_OPTIONS.find(o => o.label === periodLabel) || PREPAYMENT_OPTIONS[0];
+    const months = option.months;
+    
+    date.setMonth(date.getMonth() + months);
+    date.setDate(date.getDate() - 1);
+    
+    return date.toISOString().split('T')[0];
+  };
+
+  // Handle period change and automatically calculate amount and rent period end
+  const handlePeriodChange = (periodLabel: string) => {
+    setPrepaymentPeriod(periodLabel);
+    const lease = leases.find(l => l.id === selectedLeaseId);
+    if (lease) {
+      const option = PREPAYMENT_OPTIONS.find(o => o.label === periodLabel) || PREPAYMENT_OPTIONS[0];
+      const totalAmount = lease.monthlyRent * option.months;
+      setAmountDue(totalAmount);
+      setAmountPaid(totalAmount);
+      if (rentPeriodStart) {
+        setRentPeriodEnd(calculateEndDate(rentPeriodStart, periodLabel));
+      }
+    }
+  };
+
   // Extract unique properties from active payments
-  const propertiesInPayments = Array.from(new Set(payments.map(p => p.propertyName)));
+  const propertiesInPayments = Array.from(new Set(payments.map(p => p.propertyName).filter((name): name is string => !!name)));
 
   // Filter payments
   const filteredPayments = payments.filter(p => {
@@ -70,6 +117,7 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
     const lease = leases.find(l => l.id === selectedLeaseId);
     if (!lease) return;
 
+    const opt = PREPAYMENT_OPTIONS.find(o => o.label === prepaymentPeriod) || PREPAYMENT_OPTIONS[0];
     const receiptNum = `RCP-${Date.now().toString().slice(-6)}`;
     const newPayment: Omit<Payment, 'createdAt' | 'updatedAt'> = {
       id: `pay-${Date.now()}`,
@@ -79,6 +127,7 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
       propertyId: lease.propertyId,
       unitId: lease.unitId,
       unitNumber: lease.unitNumber,
+      propertyName: lease.propertyName,
       dueDate,
       paymentDate: amountPaid > 0 ? new Date().toISOString().split('T')[0] : undefined,
       amountDue: Number(amountDue),
@@ -87,6 +136,10 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
       paymentMethod: amountPaid > 0 ? paymentMethod : undefined,
       receiptNumber: amountPaid > 0 ? receiptNum : undefined,
       notes: paymentNotes,
+      prepaymentPeriod: opt.months > 1 ? opt.label : undefined,
+      prepaymentMonths: opt.months > 1 ? opt.months : undefined,
+      rentPeriodStart: rentPeriodStart || undefined,
+      rentPeriodEnd: rentPeriodEnd || undefined,
     };
 
     await addPayment(newPayment);
@@ -95,6 +148,9 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
     // Reset Form
     setSelectedLeaseId('');
     setDueDate('');
+    setPrepaymentPeriod('1 Month (Standard)');
+    setRentPeriodStart('');
+    setRentPeriodEnd('');
     setPaymentNotes('');
   };
 
@@ -115,13 +171,15 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
 
   // EXPORT CSV (Excel-compatible report)
   const exportToCSV = () => {
-    const headers = ['Receipt No', 'Business Name', 'Unit', 'Property', 'Due Date', 'Payment Date', 'Amount Due', 'Amount Paid', 'Status', 'Method'];
+    const headers = ['Receipt No', 'Business Name', 'Unit', 'Property', 'Due Date', 'Rent Period Start', 'Rent Period End', 'Payment Date', 'Amount Due', 'Amount Paid', 'Status', 'Method'];
     const rows = filteredPayments.map(p => [
       p.receiptNumber || 'N/A',
       p.businessName,
       p.unitNumber,
       p.propertyName,
       p.dueDate,
+      p.rentPeriodStart || 'N/A',
+      p.rentPeriodEnd || 'N/A',
       p.paymentDate || 'Pending',
       p.amountDue,
       p.amountPaid,
@@ -240,15 +298,27 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
                     {/* Tenant and Suite */}
                     <td className="px-4 py-2">
                       <div className="flex flex-col">
-                        <span className="font-bold text-slate-800">{p.businessName}</span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="font-bold text-slate-800">{p.businessName}</span>
+                          {p.prepaymentPeriod && (
+                            <span className="text-[9px] bg-indigo-50 text-indigo-700 border border-indigo-100 px-1.5 py-0.2 rounded font-bold uppercase tracking-wider shrink-0">
+                              {p.prepaymentPeriod} Prepaid
+                            </span>
+                          )}
+                        </div>
                         <span className="text-[10px] text-slate-400 font-mono">{p.propertyName} - Suite {p.unitNumber}</span>
                       </div>
                     </td>
 
                     {/* Due Date */}
                     <td className="px-4 py-2 font-mono text-[11px] text-slate-500">
-                      <div className="flex flex-col">
+                      <div className="flex flex-col space-y-0.5">
                         <span>Due: {p.dueDate}</span>
+                        {p.rentPeriodStart && p.rentPeriodEnd && (
+                          <span className="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100/50 inline-block w-max">
+                            Period: {p.rentPeriodStart} to {p.rentPeriodEnd}
+                          </span>
+                        )}
                         {p.paymentDate && <span className="text-[9px] text-emerald-600 font-bold">Paid: {p.paymentDate}</span>}
                       </div>
                     </td>
@@ -371,10 +441,15 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
                   value={selectedLeaseId}
                   onChange={(e) => {
                     setSelectedLeaseId(e.target.value);
+                    setPrepaymentPeriod('1 Month (Standard)');
                     const lease = leases.find(l => l.id === e.target.value);
                     if (lease) {
                       setAmountDue(lease.monthlyRent);
                       setAmountPaid(lease.monthlyRent);
+                      const todayStr = new Date().toISOString().split('T')[0];
+                      setDueDate(todayStr);
+                      setRentPeriodStart(todayStr);
+                      setRentPeriodEnd(calculateEndDate(todayStr, '1 Month (Standard)'));
                     }
                   }}
                   className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
@@ -386,15 +461,71 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
                 </select>
               </div>
 
+              {/* Prepayment period select */}
+              <div className="space-y-0.5">
+                <label className="text-[10px] font-bold text-slate-500 uppercase">Payment Duration / Period</label>
+                <select
+                  value={prepaymentPeriod}
+                  onChange={(e) => handlePeriodChange(e.target.value)}
+                  className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded bg-white focus:outline-none focus:border-blue-500"
+                >
+                  {PREPAYMENT_OPTIONS.map((opt) => (
+                    <option key={opt.label} value={opt.label}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+
+              {selectedLeaseId && prepaymentPeriod !== '1 Month (Standard)' && (
+                <div className="p-2 bg-indigo-50 border border-indigo-100 rounded text-[11px] text-indigo-800 font-medium">
+                  Prepayment Calculation: Br {leases.find(l => l.id === selectedLeaseId)?.monthlyRent.toLocaleString()}/mo x {PREPAYMENT_OPTIONS.find(o => o.label === prepaymentPeriod)?.months} months
+                </div>
+              )}
+
               <div className="space-y-0.5">
                 <label className="text-[10px] font-bold text-slate-500 uppercase">Rent Due Date</label>
                 <input
                   type="date"
                   required
                   value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
+                  onChange={(e) => {
+                    const newDueDate = e.target.value;
+                    setDueDate(newDueDate);
+                    if (!rentPeriodStart) {
+                      setRentPeriodStart(newDueDate);
+                      setRentPeriodEnd(calculateEndDate(newDueDate, prepaymentPeriod));
+                    }
+                  }}
                   className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded focus:outline-none focus:border-blue-500"
                 />
+              </div>
+
+              {/* Rent Period Start & End */}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-0.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Rent Period From</label>
+                  <input
+                    type="date"
+                    required
+                    value={rentPeriodStart}
+                    onChange={(e) => {
+                      const start = e.target.value;
+                      setRentPeriodStart(start);
+                      setRentPeriodEnd(calculateEndDate(start, prepaymentPeriod));
+                    }}
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded focus:outline-none focus:border-blue-500"
+                  />
+                </div>
+
+                <div className="space-y-0.5">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase">Rent Period To</label>
+                  <input
+                    type="date"
+                    required
+                    value={rentPeriodEnd}
+                    onChange={(e) => setRentPeriodEnd(e.target.value)}
+                    className="w-full px-2.5 py-1.5 text-xs border border-slate-200 rounded focus:outline-none focus:border-blue-500"
+                  />
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -552,6 +683,15 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
                 </div>
               </div>
 
+              {receiptModal.payment.rentPeriodStart && receiptModal.payment.rentPeriodEnd && (
+                <div className="bg-indigo-50/50 border border-indigo-100/40 rounded p-2 text-center text-xs text-indigo-950">
+                  <span className="font-bold uppercase text-[9px] text-indigo-500 tracking-wider block mb-0.5">Coverage Rent Period</span>
+                  <span className="font-mono font-bold">{receiptModal.payment.rentPeriodStart}</span>
+                  <span className="text-slate-400 mx-2">to</span>
+                  <span className="font-mono font-bold">{receiptModal.payment.rentPeriodEnd}</span>
+                </div>
+              )}
+
               {/* Pricing ledger Table */}
               <div className="space-y-1.5">
                 <div className="bg-slate-50 p-2 rounded flex justify-between text-[10px] font-bold text-slate-500 uppercase tracking-wider">
@@ -561,8 +701,22 @@ export const PaymentPanel: React.FC<PaymentPanelProps> = ({
 
                 <div className="space-y-1 text-xs px-2">
                   <div className="flex justify-between text-slate-700">
-                    <span>Monthly Commercial Rental Fee ({receiptModal.payment.unitNumber})</span>
-                    <span className="font-semibold">Br {receiptModal.payment.amountDue.toLocaleString()}</span>
+                    <div className="space-y-0.5">
+                      <span>
+                        {receiptModal.payment.prepaymentPeriod ? (
+                          <span>Commercial Rental Prepayment ({receiptModal.payment.prepaymentPeriod})</span>
+                        ) : (
+                          <span>Monthly Commercial Rental Fee</span>
+                        )}
+                        {` (${receiptModal.payment.unitNumber})`}
+                      </span>
+                      {receiptModal.payment.prepaymentPeriod && receiptModal.payment.prepaymentMonths && (
+                        <div className="text-[10px] text-slate-400 font-medium">
+                          Calculated as Br {Math.round(receiptModal.payment.amountDue / receiptModal.payment.prepaymentMonths).toLocaleString()}/month x {receiptModal.payment.prepaymentMonths} months
+                        </div>
+                      )}
+                    </div>
+                    <span className="font-semibold align-top">Br {receiptModal.payment.amountDue.toLocaleString()}</span>
                   </div>
                   <div className="flex justify-between font-bold text-emerald-600 border-t border-slate-200 pt-1.5 text-xs">
                     <span>Total Amount Paid ({receiptModal.payment.paymentMethod})</span>

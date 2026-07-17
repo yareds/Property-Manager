@@ -111,8 +111,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       tenantsJson && (
         tenantsJson.includes('ByteCore') || 
         tenantsJson.includes('Apex Consulting') || 
-        tenantsJson.includes('INDOCHINE APPAREL PLC') || 
-        !tenantsJson.includes('Omo Microfinance S.C')
+        tenantsJson.includes('INDOCHINE APPAREL PLC')
       )
     ) {
       localStorage.removeItem('pm_properties');
@@ -345,7 +344,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Save guest lists to LocalStorage whenever they change
   useEffect(() => {
-    if (isGuest && !user) {
+    if (isGuest && !user && !loading) {
       saveLocalStorageData('pm_properties', properties);
       saveLocalStorageData('pm_units', units);
       saveLocalStorageData('pm_tenants', tenants);
@@ -355,7 +354,7 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       saveLocalStorageData('pm_notifications', notifications);
       saveLocalStorageData('pm_documents', documents);
     }
-  }, [isGuest, user, properties, units, tenants, leases, payments, maintenance, notifications, documents]);
+  }, [isGuest, user, loading, properties, units, tenants, leases, payments, maintenance, notifications, documents]);
 
   // SEED DATABASE WITH SAMPLE DATA
   const seedDatabase = async () => {
@@ -611,7 +610,6 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     if (user) {
       try {
         await deleteDoc(doc(db, 'tenants', id));
-        setTenants(prev => prev.filter(t => d => d.id !== id));
         setTenants(prev => prev.filter(t => t.id !== id));
       } catch (err) {
         console.error('Failed to delete tenant:', err);
