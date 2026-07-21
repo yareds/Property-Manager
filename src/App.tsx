@@ -360,7 +360,7 @@ export default function App() {
               <Building size={32} className="stroke-[2.2]" />
             </div>
             <div className="space-y-1">
-              <h1 className="text-2xl font-bold tracking-tight text-white">Getch ProManager</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-white">GETCH Property Management App</h1>
               <p className="text-xs text-slate-400 font-medium">Real Estate Asset Lease Management</p>
             </div>
           </div>
@@ -443,7 +443,7 @@ export default function App() {
           <div className="px-6 py-[24px] border-b border-[#1e293b] flex items-center justify-between">
             <div className="flex items-center space-x-2 text-white">
               <Building size={16} className="stroke-[2.5] text-blue-500" />
-              <span className="font-bold text-[16px] tracking-tight text-white font-sans">Getch ProManager</span>
+              <span className="font-bold text-[16px] tracking-tight text-white font-sans">GETCH Property Management App</span>
             </div>
             {isGuest && (
               <span className="text-[9px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded font-bold border border-slate-700">
@@ -591,7 +591,7 @@ export default function App() {
             <LogOut size={16} />
           </button>
           <Building size={18} className="text-indigo-400" />
-          <span className="font-extrabold text-xs uppercase tracking-wider">Getch ProManager</span>
+          <span className="font-extrabold text-xs uppercase tracking-wider">GETCH Property Management App</span>
         </div>
 
         <div className="flex items-center space-x-3">
