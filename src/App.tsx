@@ -714,7 +714,7 @@ export default function App() {
               <button
                 onClick={() => setShowNotifMenu(!showNotifMenu)}
                 className="p-1.5 bg-slate-50 border border-slate-200 hover:bg-slate-100 rounded text-slate-600 transition relative"
-                title="Smart compliance alerts"
+                title="Compliance alerts"
               >
                 <Bell size={15} />
                 {unreadNotifs.length > 0 && (
