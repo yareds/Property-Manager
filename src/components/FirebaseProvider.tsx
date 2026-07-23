@@ -136,6 +136,13 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Allowed Admin Emails
+  const ALLOWED_ADMIN_EMAILS = [
+    'yared.abegaz@gmail.com',
+    'devmeron528@gmail.com',
+    'molla.yareds@gmail.com'
+  ];
+
   // Helper: Read LocalStorage fallback data
   const getLocalStorageData = <T,>(key: string, defaults: T[]): T[] => {
     const item = localStorage.getItem(key);
@@ -158,6 +165,16 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const login = async () => {
     try {
       const signedInUser = await signInWithGoogle();
+      if (signedInUser && signedInUser.email) {
+        const emailLower = signedInUser.email.toLowerCase();
+        const isAuthorized = ALLOWED_ADMIN_EMAILS.some(e => e.toLowerCase() === emailLower);
+        if (!isAuthorized) {
+          await logoutUser();
+          setUser(null);
+          alert(`Access Denied: ${signedInUser.email} is not authorized to use this application. Only designated property managers are permitted.`);
+          return;
+        }
+      }
       setUser(signedInUser);
       setIsGuest(false);
       localStorage.setItem('pm_is_guest', 'false');
@@ -187,7 +204,19 @@ export const FirebaseProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Auth State Listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser && firebaseUser.email) {
+        const emailLower = firebaseUser.email.toLowerCase();
+        const isAuthorized = ALLOWED_ADMIN_EMAILS.some(e => e.toLowerCase() === emailLower);
+        if (!isAuthorized) {
+          console.warn("Unauthorized login attempt blocked:", firebaseUser.email);
+          await logoutUser();
+          setUser(null);
+          setAuthLoading(false);
+          alert(`Access Denied: ${firebaseUser.email} is not authorized to use this application.`);
+          return;
+        }
+      }
       setUser(firebaseUser);
       setAuthLoading(false);
       if (firebaseUser) {

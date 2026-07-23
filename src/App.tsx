@@ -92,48 +92,71 @@ export default function App() {
     setBackendAuditing(true);
     setBackendAuditResult(null);
     try {
-      const response = await fetch('/api/compliance-check', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          payments,
-          leases,
-          userEmail: user?.email || 'yared.abegaz@gmail.com',
-        }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setBackendAuditResult({
-          success: true,
-          dispatchedCount: data.dispatchedNotifications?.length || 0,
-          timestamp: data.auditTimestamp,
-        });
-        
-        // Dispatch notifications from server audit securely to the client
-        if (data.dispatchedNotifications && data.dispatchedNotifications.length > 0) {
-          for (const notif of data.dispatchedNotifications) {
-            if (!notifications.some(n => n.id === notif.id)) {
-              await addNotification({
-                id: notif.id,
-                title: notif.title,
-                message: notif.message,
-                type: notif.type,
-                status: notif.status,
-                userId: user?.uid || 'guest-user',
-              });
-            }
+      const generatedNotifications = [];
+      const now = new Date();
+
+      // Audit leases near expiration (within 30 days)
+      if (Array.isArray(leases)) {
+        for (const lease of leases) {
+          const end = new Date(lease.endDate);
+          const diffTime = end.getTime() - now.getTime();
+          const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+          if (diffDays > 0 && diffDays <= 30) {
+            generatedNotifications.push({
+              id: `notif-expiry-${lease.id}`,
+              title: 'Lease Near Expiration',
+              message: `The lease for ${lease.businessName} (Unit ${lease.unitNumber}) expires on ${lease.endDate} (${diffDays} days left).`,
+              type: 'lease_expiration',
+              status: 'Unread' as const,
+              createdAt: now.toISOString(),
+            });
           }
         }
-      } else {
-        setBackendAuditResult({
-          success: false,
-          error: data.error || 'Server rejected audit request',
-        });
       }
+
+      // Audit overdue payments
+      if (Array.isArray(payments)) {
+        for (const payment of payments) {
+          if (payment.paymentStatus === 'Overdue') {
+            generatedNotifications.push({
+              id: `notif-overdue-${payment.id}`,
+              title: 'Rent Overdue Compliance Alert',
+              message: `Rent for ${payment.businessName} (Unit ${payment.unitNumber}) is Overdue. Due date was ${payment.dueDate}.`,
+              type: 'rent_overdue',
+              status: 'Unread' as const,
+              createdAt: now.toISOString(),
+            });
+          }
+        }
+      }
+
+      let newDispatchedCount = 0;
+      if (generatedNotifications.length > 0) {
+        for (const notif of generatedNotifications) {
+          if (!notifications.some(n => n.id === notif.id)) {
+            await addNotification({
+              id: notif.id,
+              title: notif.title,
+              message: notif.message,
+              type: notif.type,
+              status: notif.status,
+              userId: user?.uid || 'guest-user',
+            });
+            newDispatchedCount++;
+          }
+        }
+      }
+
+      setBackendAuditResult({
+        success: true,
+        dispatchedCount: newDispatchedCount,
+        timestamp: now.toISOString(),
+      });
     } catch (err: any) {
       setBackendAuditResult({
         success: false,
-        error: err.message || 'Server connection failed',
+        error: err.message || 'Compliance audit failed',
       });
     } finally {
       setBackendAuditing(false);
