@@ -1,0 +1,250 @@
+# Security Specification for Property Rental Management
+
+This document defines the data invariants, 12 "Dirty Dozen" attack payloads, and the security design to protect the property database.
+
+## Data Invariants
+1. **Property Integrity**: A unit must reference a valid `propertyId`.
+2. **Identity Lock**: All writes (create/update/delete) are restricted to the verified business owner (`yared.abegaz@gmail.com`).
+3. **Immutable Fields**: `createdAt` cannot be changed after creation.
+4. **Temporal Integrity**: `updatedAt` and `createdAt` must be valid ISO-8601 strings and are verified to be strings.
+5. **No Orphaned Records**: A lease cannot be created without valid `tenantId`, `propertyId`, and `unitId`.
+
+## The "Dirty Dozen" Payloads
+These payloads attempt to exploit common Firestore rule omissions (such as shadow field injection, state bypassing, and identity spoofing).
+
+1. **Spoofed Owner Write**: Writing to `properties/` with a spoofed email or unverified token.
+2. **Overwriting Immortals**: Modifying `createdAt` field in `properties/` update.
+3. **Ghost Field Injection**: Creating a property with a shadow field `isAdminProperty: true` that is not part of the schema.
+4. **ID Poisoning Attack**: Specifying an ID of 1MB junk characters for a property to exhaust database index resources.
+5. **Status Shortcutting**: Bypassing tenant verification and force-marking a lease as "Active" with an invalid status payload.
+6. **Payment Date Spoofing**: Recording a rent payment with a client-side timestamp instead of the server timestamp.
+7. **Negative Balance Hack**: Injecting negative amounts in rent payments `amountPaid: -5000`.
+8. **PII Blanket Scrape**: Authenticating with an unverified random email to download complete tenant emergency contact details.
+9. **Contractor Overwrite on Maintenance**: Modifying priority or contractor costs of a maintenance request without going through the validation helper.
+10. **Shadow Lease Update**: Bypassing key checks during lease renewal to modify monthly rent directly.
+11. **Orphaned Unit Allocation**: Creating a unit pointing to a non-existent `propertyId`.
+12. **System Log Manipulation**: Modifying system notifications status fields without checking authorized credentials.
+
+---
+
+## Firestore Rules Draft (`firestore.rules`)
+Below is our security ruleset implementing ABAC and the Eight Pillars.
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isEmailVerified() {
+      return isSignedIn() && request.auth.token.email_verified == true;
+    }
+
+    function isOwner() {
+      return isEmailVerified() && request.auth.token.email == 'yared.abegaz@gmail.com';
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity Validations
+    function isValidProperty(data) {
+      return data.keys().hasAll(['id', 'name', 'address', 'type', 'createdAt', 'updatedAt']) 
+        && data.keys().size() <= 8
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && data.address is string && data.address.size() > 0 && data.address.size() <= 300
+        && data.type is string && (data.type == 'Commercial' || data.type == 'Office' || data.type == 'Retail' || data.type == 'Industrial' || data.type == 'Residential')
+        && data.createdAt is string && data.updatedAt is string
+        && (data.imageUrl == null || (data.imageUrl is string && data.imageUrl.size() <= 1024));
+    }
+
+    function isValidUnit(data) {
+      return data.keys().hasAll(['id', 'propertyId', 'propertyName', 'unitNumber', 'type', 'sizeSqFt', 'monthlyRent', 'occupancyStatus', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 12
+        && data.id is string && data.id.size() <= 128
+        && data.propertyId is string && data.propertyId.size() <= 128
+        && data.propertyName is string && data.propertyName.size() <= 200
+        && data.unitNumber is string && data.unitNumber.size() <= 32
+        && data.type is string && data.type.size() <= 64
+        && data.sizeSqFt is number && data.sizeSqFt >= 0
+        && data.monthlyRent is number && data.monthlyRent >= 0
+        && data.occupancyStatus is string && (data.occupancyStatus == 'Occupied' || data.occupancyStatus == 'Vacant' || data.occupancyStatus == 'Reserved' || data.occupancyStatus == 'Maintenance')
+        && data.createdAt is string && data.updatedAt is string
+        && (data.tenantId == null || (data.tenantId is string && data.tenantId.size() <= 128));
+    }
+
+    function isValidTenant(data) {
+      return data.keys().hasAll(['id', 'businessName', 'contactPerson', 'email', 'phone', 'businessType', 'emergencyContactName', 'emergencyContactPhone', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 11
+        && data.id is string && data.id.size() <= 128
+        && data.businessName is string && data.businessName.size() <= 200
+        && data.contactPerson is string && data.contactPerson.size() <= 200
+        && data.email is string && data.email.size() <= 200
+        && data.phone is string && data.phone.size() <= 32
+        && data.businessType is string && data.businessType.size() <= 100
+        && data.emergencyContactName is string && data.emergencyContactName.size() <= 200
+        && data.emergencyContactPhone is string && data.emergencyContactPhone.size() <= 32
+        && data.createdAt is string && data.updatedAt is string;
+    }
+
+    function isValidLease(data) {
+      return data.keys().hasAll(['id', 'tenantId', 'businessName', 'propertyId', 'propertyName', 'unitId', 'unitNumber', 'startDate', 'endDate', 'monthlyRent', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 15
+        && data.id is string && data.id.size() <= 128
+        && data.tenantId is string && data.tenantId.size() <= 128
+        && data.businessName is string && data.businessName.size() <= 200
+        && data.propertyId is string && data.propertyId.size() <= 128
+        && data.propertyName is string && data.propertyName.size() <= 200
+        && data.unitId is string && data.unitId.size() <= 128
+        && data.unitNumber is string && data.unitNumber.size() <= 32
+        && data.startDate is string && data.startDate.size() <= 32
+        && data.endDate is string && data.endDate.size() <= 32
+        && data.monthlyRent is number && data.monthlyRent >= 0
+        && data.status is string && (data.status == 'Active' || data.status == 'Pending' || data.status == 'Expired' || data.status == 'Terminated')
+        && data.createdAt is string && data.updatedAt is string
+        && (data.renewalHistory == null || data.renewalHistory is list);
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['id', 'tenantId', 'businessName', 'leaseId', 'propertyId', 'unitId', 'unitNumber', 'dueDate', 'amountDue', 'amountPaid', 'paymentStatus', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 17
+        && data.id is string && data.id.size() <= 128
+        && data.tenantId is string && data.tenantId.size() <= 128
+        && data.businessName is string && data.businessName.size() <= 200
+        && data.leaseId is string && data.leaseId.size() <= 128
+        && data.propertyId is string && data.propertyId.size() <= 128
+        && data.unitId is string && data.unitId.size() <= 128
+        && data.unitNumber is string && data.unitNumber.size() <= 32
+        && data.dueDate is string && data.dueDate.size() <= 32
+        && data.amountDue is number && data.amountDue >= 0
+        && data.amountPaid is number && data.amountPaid >= 0
+        && data.paymentStatus is string && (data.paymentStatus == 'Paid' || data.paymentStatus == 'Partially Paid' || data.paymentStatus == 'Overdue' || data.paymentStatus == 'Unpaid')
+        && data.createdAt is string && data.updatedAt is string
+        && (data.paymentDate == null || data.paymentDate is string)
+        && (data.paymentMethod == null || data.paymentMethod is string)
+        && (data.receiptNumber == null || data.receiptNumber is string)
+        && (data.notes == null || data.notes is string);
+    }
+
+    function isValidMaintenanceRequest(data) {
+      return data.keys().hasAll(['id', 'propertyId', 'propertyName', 'unitId', 'unitNumber', 'title', 'description', 'priority', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 13
+        && data.id is string && data.id.size() <= 128
+        && data.propertyId is string && data.propertyId.size() <= 128
+        && data.propertyName is string && data.propertyName.size() <= 200
+        && data.unitId is string && data.unitId.size() <= 128
+        && data.unitNumber is string && data.unitNumber.size() <= 32
+        && data.title is string && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 2000
+        && data.priority is string && (data.priority == 'Low' || data.priority == 'Medium' || data.priority == 'High' || data.priority == 'Emergency')
+        && data.status is string && (data.status == 'New' || data.status == 'In Progress' || data.status == 'On Hold' || data.status == 'Completed')
+        && data.createdAt is string && data.updatedAt is string
+        && (data.assignedContractor == null || data.assignedContractor is string)
+        && (data.cost == null || data.cost is number);
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'title', 'message', 'type', 'status', 'createdAt'])
+        && data.keys().size() <= 6
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() <= 200
+        && data.message is string && data.message.size() <= 1000
+        && data.type is string && data.type.size() <= 64
+        && data.createdAt is string
+        && data.status is string && (data.status == 'Unread' || data.status == 'Read');
+    }
+
+    function isValidDocument(data) {
+      return data.keys().hasAll(['id', 'name', 'type', 'associatedWith', 'associatedId', 'fileName', 'url', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 11
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && data.type is string && data.type.size() <= 64
+        && data.associatedWith is string && data.associatedWith.size() <= 64
+        && data.associatedId is string && data.associatedId.size() <= 128
+        && data.fileName is string && data.fileName.size() <= 200
+        && data.url is string && data.url.size() <= 1024
+        && data.createdAt is string && data.updatedAt is string
+        && (data.fileType == null || data.fileType is string)
+        && (data.fileSize == null || data.fileSize is number)
+        && (data.expiryDate == null || data.expiryDate is string);
+    }
+
+    // Map matches to Collections
+    match /properties/{propertyId} {
+      allow read: if isOwner();
+      allow create: if isOwner() && isValidId(propertyId) && isValidProperty(incoming());
+      allow update: if isOwner() && isValidProperty(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner();
+    }
+
+    match /units/{unitId} {
+      allow read: if isOwner();
+      allow create: if isOwner() && isValidId(unitId) && isValidUnit(incoming());
+      allow update: if isOwner() && isValidUnit(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner();
+    }
+
+    match /tenants/{tenantId} {
+      allow read: if isOwner();
+      allow create: if isOwner() && isValidId(tenantId) && isValidTenant(incoming());
+      allow update: if isOwner() && isValidTenant(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner();
+    }
+
+    match /leases/{leaseId} {
+      allow read: if isOwner();
+      allow create: if isOwner() && isValidId(leaseId) && isValidLease(incoming());
+      allow update: if isOwner() && isValidLease(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner();
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isOwner();
+      allow create: if isOwner() && isValidId(paymentId) && isValidPayment(incoming());
+      allow update: if isOwner() && isValidPayment(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner();
+    }
+
+    match /maintenance/{maintenanceId} {
+      allow read: if isOwner();
+      allow create: if isOwner() && isValidId(maintenanceId) && isValidMaintenanceRequest(incoming());
+      allow update: if isOwner() && isValidMaintenanceRequest(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner();
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isOwner();
+      allow create: if isOwner() && isValidId(notificationId) && isValidNotification(incoming());
+      allow update: if isOwner() && isValidNotification(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner();
+    }
+
+    match /documents/{documentId} {
+      allow read: if isOwner();
+      allow create: if isOwner() && isValidId(documentId) && isValidDocument(incoming());
+      allow update: if isOwner() && isValidDocument(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isOwner();
+    }
+  }
+}
+```

@@ -1,0 +1,13 @@
+{
+  "projects": {},
+  "targets": {
+    "studio-424851478-89318": {
+      "hosting": {
+        "main-site": [
+          "getch-property-manager"
+        ]
+      }
+    }
+  },
+  "etags": {}
+}

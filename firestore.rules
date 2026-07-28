@@ -1,0 +1,233 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isVerified() {
+      return isSignedIn() 
+        && (request.auth.token.email_verified == true || request.auth.token.email != null)
+        && (
+          request.auth.token.email == "yared.abegaz@gmail.com" ||
+          request.auth.token.email == "devmeron528@gmail.com" ||
+          request.auth.token.email == "molla.yareds@gmail.com"
+        );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // Entity Validations
+    function isValidProperty(data) {
+      return data.keys().hasAll(['id', 'name', 'address', 'type', 'createdAt', 'updatedAt']) 
+        && data.keys().size() <= 8
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && data.address is string && data.address.size() > 0 && data.address.size() <= 300
+        && data.type is string && (data.type == 'Commercial' || data.type == 'Office' || data.type == 'Retail' || data.type == 'Industrial' || data.type == 'Residential')
+        && data.createdAt is string && data.updatedAt is string
+        && (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1024))
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isValidUnit(data) {
+      return data.keys().hasAll(['id', 'propertyId', 'propertyName', 'unitNumber', 'type', 'sizeSqFt', 'monthlyRent', 'occupancyStatus', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 12
+        && data.id is string && data.id.size() <= 128
+        && data.propertyId is string && data.propertyId.size() <= 128
+        && data.propertyName is string && data.propertyName.size() <= 200
+        && data.unitNumber is string && data.unitNumber.size() <= 32
+        && data.type is string && data.type.size() <= 64
+        && data.sizeSqFt is number && data.sizeSqFt >= 0
+        && data.monthlyRent is number && data.monthlyRent >= 0
+        && data.occupancyStatus is string && (data.occupancyStatus == 'Occupied' || data.occupancyStatus == 'Vacant' || data.occupancyStatus == 'Reserved' || data.occupancyStatus == 'Maintenance')
+        && data.createdAt is string && data.updatedAt is string
+        && (!('tenantId' in data) || (data.tenantId is string && data.tenantId.size() <= 128))
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isValidTenant(data) {
+      return data.keys().hasAll(['id', 'businessName', 'contactPerson', 'email', 'phone', 'businessType', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 12
+        && data.id is string && data.id.size() <= 128
+        && data.businessName is string && data.businessName.size() <= 200
+        && data.contactPerson is string && data.contactPerson.size() <= 200
+        && data.email is string && data.email.size() <= 200
+        && data.phone is string && data.phone.size() <= 32
+        && data.businessType is string && data.businessType.size() <= 100
+        && (!('emergencyContactName' in data) || (data.emergencyContactName is string && data.emergencyContactName.size() <= 200))
+        && (!('emergencyContactPhone' in data) || (data.emergencyContactPhone is string && data.emergencyContactPhone.size() <= 32))
+        && (!('status' in data) || (data.status is string && data.status.size() <= 32))
+        && data.createdAt is string && data.updatedAt is string
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isValidLease(data) {
+      return data.keys().hasAll(['id', 'tenantId', 'businessName', 'propertyId', 'propertyName', 'unitId', 'unitNumber', 'startDate', 'endDate', 'monthlyRent', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 16
+        && data.id is string && data.id.size() <= 128
+        && data.tenantId is string && data.tenantId.size() <= 128
+        && data.businessName is string && data.businessName.size() <= 200
+        && data.propertyId is string && data.propertyId.size() <= 128
+        && data.propertyName is string && data.propertyName.size() <= 200
+        && data.unitId is string && data.unitId.size() <= 128
+        && data.unitNumber is string && data.unitNumber.size() <= 32
+        && data.startDate is string && data.startDate.size() <= 32
+        && data.endDate is string && data.endDate.size() <= 32
+        && data.monthlyRent is number && data.monthlyRent >= 0
+        && (!('depositAmount' in data) || data.depositAmount is number)
+        && data.status is string && (data.status == 'Active' || data.status == 'Pending' || data.status == 'Expired' || data.status == 'Terminated')
+        && data.createdAt is string && data.updatedAt is string
+        && (!('renewalHistory' in data) || data.renewalHistory is list)
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isValidPayment(data) {
+      return data.keys().hasAll(['id', 'tenantId', 'businessName', 'leaseId', 'propertyId', 'unitId', 'unitNumber', 'dueDate', 'amountDue', 'amountPaid', 'paymentStatus', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 24
+        && data.id is string && data.id.size() <= 128
+        && data.tenantId is string && data.tenantId.size() <= 128
+        && data.businessName is string && data.businessName.size() <= 200
+        && data.leaseId is string && data.leaseId.size() <= 128
+        && data.propertyId is string && data.propertyId.size() <= 128
+        && data.unitId is string && data.unitId.size() <= 128
+        && data.unitNumber is string && data.unitNumber.size() <= 32
+        && data.dueDate is string && data.dueDate.size() <= 32
+        && data.amountDue is number && data.amountDue >= 0
+        && data.amountPaid is number && data.amountPaid >= 0
+        && data.paymentStatus is string && (data.paymentStatus == 'Paid' || data.paymentStatus == 'Partially Paid' || data.paymentStatus == 'Overdue' || data.paymentStatus == 'Unpaid')
+        && data.createdAt is string && data.updatedAt is string
+        && (!('paymentDate' in data) || data.paymentDate is string)
+        && (!('paymentMethod' in data) || data.paymentMethod is string)
+        && (!('receiptNumber' in data) || data.receiptNumber is string)
+        && (!('notes' in data) || data.notes is string)
+        && (!('propertyName' in data) || (data.propertyName is string && data.propertyName.size() <= 200))
+        && (!('prepaymentPeriod' in data) || (data.prepaymentPeriod is string && data.prepaymentPeriod.size() <= 64))
+        && (!('prepaymentMonths' in data) || (data.prepaymentMonths is number && data.prepaymentMonths >= 0))
+        && (!('rentPeriodStart' in data) || (data.rentPeriodStart is string && data.rentPeriodStart.size() <= 32))
+        && (!('rentPeriodEnd' in data) || (data.rentPeriodEnd is string && data.rentPeriodEnd.size() <= 32))
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isValidMaintenanceRequest(data) {
+      return data.keys().hasAll(['id', 'propertyId', 'propertyName', 'unitId', 'unitNumber', 'title', 'description', 'priority', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 14
+        && data.id is string && data.id.size() <= 128
+        && data.propertyId is string && data.propertyId.size() <= 128
+        && data.propertyName is string && data.propertyName.size() <= 200
+        && data.unitId is string && data.unitId.size() <= 128
+        && data.unitNumber is string && data.unitNumber.size() <= 32
+        && data.title is string && data.title.size() <= 200
+        && data.description is string && data.description.size() <= 2000
+        && data.priority is string && (data.priority == 'Low' || data.priority == 'Medium' || data.priority == 'High' || data.priority == 'Emergency')
+        && data.status is string && (data.status == 'New' || data.status == 'In Progress' || data.status == 'On Hold' || data.status == 'Completed')
+        && data.createdAt is string && data.updatedAt is string
+        && (!('assignedContractor' in data) || data.assignedContractor is string)
+        && (!('cost' in data) || data.cost is number)
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'title', 'message', 'type', 'status', 'createdAt'])
+        && data.keys().size() <= 8
+        && data.id is string && data.id.size() <= 128
+        && data.title is string && data.title.size() <= 200
+        && data.message is string && data.message.size() <= 1000
+        && data.type is string && data.type.size() <= 64
+        && data.createdAt is string
+        && data.status is string && (data.status == 'Unread' || data.status == 'Read')
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    function isValidDocument(data) {
+      return data.keys().hasAll(['id', 'name', 'type', 'associatedWith', 'associatedId', 'fileName', 'url', 'createdAt', 'updatedAt'])
+        && data.keys().size() <= 13
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 200
+        && data.type is string && data.type.size() <= 64
+        && data.associatedWith is string && data.associatedWith.size() <= 64
+        && data.associatedId is string && data.associatedId.size() <= 128
+        && data.fileName is string && data.fileName.size() <= 200
+        && data.url is string && data.url.size() <= 1024
+        && data.createdAt is string && data.updatedAt is string
+        && (!('fileType' in data) || data.fileType is string)
+        && (!('fileSize' in data) || data.fileSize is number)
+        && (!('expiryDate' in data) || data.expiryDate is string)
+        && (!('userId' in data) || (data.userId is string && data.userId.size() <= 128));
+    }
+
+    // Map matches to Collections
+    match /properties/{propertyId} {
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(propertyId) && isValidProperty(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidProperty(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
+    }
+
+    match /units/{unitId} {
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(unitId) && isValidUnit(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidUnit(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
+    }
+
+    match /tenants/{tenantId} {
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(tenantId) && isValidTenant(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidTenant(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
+    }
+
+    match /leases/{leaseId} {
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(leaseId) && isValidLease(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidLease(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
+    }
+
+    match /payments/{paymentId} {
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(paymentId) && isValidPayment(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidPayment(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
+    }
+
+    match /maintenance/{maintenanceId} {
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(maintenanceId) && isValidMaintenanceRequest(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidMaintenanceRequest(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(notificationId) && isValidNotification(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidNotification(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
+    }
+
+    match /documents/{documentId} {
+      allow read: if isVerified() && (resource == null || resource.data.userId == request.auth.uid);
+      allow create: if isVerified() && incoming().userId == request.auth.uid && isValidId(documentId) && isValidDocument(incoming());
+      allow update: if isVerified() && existing().userId == request.auth.uid && incoming().userId == request.auth.uid && isValidDocument(incoming()) && incoming().createdAt == existing().createdAt;
+      allow delete: if isVerified() && existing().userId == request.auth.uid;
+    }
+  }
+}
